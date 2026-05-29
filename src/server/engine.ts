@@ -29,6 +29,7 @@ import { resolveAdtLsPath } from '../adt-ls/discovery.js';
 import { AdtLsDriver } from '../adt-ls/driver.js';
 import { AdtLsMcpClient, type McpTool } from '../adt-ls/mcp-federation.js';
 import { setMcpDestination, startMcpServer, stopMcpServer } from '../adt-ls/mcp-lifecycle.js';
+import { type SearchReference, getInactiveObjects, quickSearch } from '../adt-ls/repository.js';
 import { type TlsReverseProxy, startTlsReverseProxy } from '../adt-ls/tls-reverse-proxy.js';
 import { type ConnectivityBridge, startConnectivityBridge } from '../btp/bridge.js';
 import { createConnectivityProxy } from '../btp/connectivity.js';
@@ -49,6 +50,10 @@ export interface Engine {
   listTools(): Promise<McpTool[]>;
   callTool(name: string, args?: Record<string, unknown>): Promise<unknown>;
   setDestination(destinationId: string): Promise<void>;
+  /** Repository object search (LSP quickSearch) on the connected destination. */
+  search(pattern: string, opts?: { maxResults?: number; types?: string[] }): Promise<SearchReference[]>;
+  /** Inactive (draft) objects on the connected destination (LSP). */
+  listInactiveObjects(): Promise<unknown[]>;
   /** The destination logged on at startup, if any. */
   connectedDestination?: string;
   dispose(): Promise<void>;
@@ -142,6 +147,20 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     callTool: (name, args = {}) => federation.callTool(name, args),
     setDestination: async (destinationId) => {
       await setMcpDestination(driver, destinationId);
+    },
+    search: async (pattern, opts = {}) => {
+      if (!connectedDestination) throw new Error('No ABAP destination is connected.');
+      const r = await quickSearch(driver, {
+        destination: connectedDestination,
+        pattern,
+        maxResults: opts.maxResults,
+        types: opts.types,
+      });
+      return r.references ?? [];
+    },
+    listInactiveObjects: async () => {
+      if (!connectedDestination) throw new Error('No ABAP destination is connected.');
+      return getInactiveObjects(driver, connectedDestination);
     },
     dispose: async () => {
       await stopMcpServer(driver).catch(() => {});

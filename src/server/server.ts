@@ -59,5 +59,41 @@ export function createMcpServer(engine: Engine): McpServer {
     },
   );
 
+  server.registerTool(
+    'search_objects',
+    {
+      description:
+        'Search ABAP repository objects on the connected system by name pattern (e.g. "CL_ABAP*"). Returns name, type, description, and ADT uri for each hit.',
+      inputSchema: {
+        pattern: z.string().describe('Name pattern, e.g. "CL_ABAP_TYPEDESCR" or "ZCL_*".'),
+        maxResults: z.number().int().positive().max(200).optional().describe('Max hits (default 50).'),
+        types: z
+          .array(z.string())
+          .optional()
+          .describe('Optional ADT object-type filter (e.g. ["CLAS/OC"]); empty = all types.'),
+      },
+    },
+    async ({ pattern, maxResults, types }) => {
+      if (!engine.connectedDestination) {
+        return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
+      }
+      return text(await engine.search(pattern, { maxResults, types }));
+    },
+  );
+
+  server.registerTool(
+    'list_inactive_objects',
+    {
+      description: 'List inactive (draft) objects on the connected system — those edited but not yet activated.',
+      inputSchema: {},
+    },
+    async () => {
+      if (!engine.connectedDestination) {
+        return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
+      }
+      return text(await engine.listInactiveObjects());
+    },
+  );
+
   return server;
 }

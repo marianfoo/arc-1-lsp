@@ -48,8 +48,9 @@ node dist/index.js          # or: npm run dev
 ```
 
 Point an MCP client at the process (stdio). Tools: `health`, `list_destinations`,
-`list_creatable_objects`. To auto-connect a SAP system on startup, set the
-`ARC1_SAP_*` vars (see Config) — e.g. against an internet-reachable system:
+`list_creatable_objects`, `search_objects`, `list_inactive_objects`. To
+auto-connect a SAP system on startup, set the `ARC1_SAP_*` vars (see Config) —
+e.g. against an internet-reachable system:
 
 ```bash
 ARC1_SAP_HOST=a4h.marianzeis.de ARC1_SAP_PORT=50001 \

@@ -22,6 +22,9 @@ so understand the **why** before changing anything:
 - **`docs/journey.md`** — the chronological story incl. dead-ends (don't re-walk them).
 - **`docs/adt-ls-headless-notes.md`** — the reverse-engineered headless connection
   recipe (initialize/userAgentInfos, reentrance-ticket logon, HTTPS requirement).
+- **`docs/adt-ls-tool-surface.md`** — what's reachable headless for building tools:
+  the 14 federated MCP tools, the LSP method map, quickSearch's exact params, and
+  the `read_source` HARD BLOCKER (readFile needs VS Code's workspace/tree model).
 - **`docs/plans/`** — ralphex plans (completed + in-progress) per roadmap state.
 
 ## Design principles (non-negotiable)
@@ -49,6 +52,7 @@ src/
 │   │                        #   server→client handlers) + extraEnv (JAVA_TOOL_OPTIONS truststore)
 │   ├── mcp-lifecycle.ts     # adtLs/mcp/{startMCPServer,stopMCPServer,setDestination}
 │   ├── mcp-federation.ts    # Streamable-HTTP client to adt-ls's own /mcp
+│   ├── repository.ts        # read-only LSP queries: quickSearch (SAPSearch) + getInactiveObjects
 │   ├── destinations.ts      # initializeService/create/ensureLoggedOn/getLogonInfo + headless
 │   │                        #   reentrance-ticket logon handler (ADR-0006)
 │   ├── tls-reverse-proxy.ts # TLS terminator: adt-ls → https://localhost → backend (direct | bridge)
@@ -65,8 +69,9 @@ src/
     ├── logger.ts            # stderr-only logger
     ├── auth.ts              # API-key edge auth (Bearer | x-api-key)
     ├── http.ts              # http-streamable transport + API-key gate + /healthz
-    ├── engine.ts            # discover→spawn→startMCP→federate; planConnection + connect (direct|CC)
-    └── server.ts            # McpServer + tools (health, list_destinations, list_creatable_objects)
+    ├── engine.ts            # discover→spawn→startMCP→federate; planConnection + connect (direct|CC); search/listInactive
+    └── server.ts            # McpServer + tools (health, list_destinations, list_creatable_objects,
+    │                        #   search_objects, list_inactive_objects)
 tests/unit/…                 # vitest; adt-ls/SAP-dependent tests are skipIf-gated
 docs/plans/…                 # ralphex plans (one per roadmap state)
 ```

@@ -10,6 +10,8 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
     listTools: async () => [],
     callTool: async () => ({ content: [{ type: 'text', text: '["A4H_001"]' }] }),
     setDestination: async () => {},
+    search: async () => [],
+    listInactiveObjects: async () => [],
     dispose: async () => {},
     ...overrides,
   };
@@ -27,7 +29,13 @@ describe('createMcpServer', () => {
   it('registers exactly the foundation tools', async () => {
     const client = await linkedClient(fakeEngine());
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(['health', 'list_creatable_objects', 'list_destinations']);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      'health',
+      'list_creatable_objects',
+      'list_destinations',
+      'list_inactive_objects',
+      'search_objects',
+    ]);
   });
 
   it('health returns the engine health (adt-ls version + port)', async () => {
@@ -72,5 +80,40 @@ describe('createMcpServer', () => {
     const client = await linkedClient(fakeEngine()); // no connectedDestination
     const res = await client.callTool({ name: 'list_creatable_objects', arguments: {} });
     expect(JSON.stringify(res.content)).toContain('No ABAP destination is connected');
+  });
+
+  it('search_objects delegates to engine.search with the pattern + options', async () => {
+    let got: { pattern?: string; opts?: unknown } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        search: async (pattern, opts) => {
+          got = { pattern, opts };
+          return [{ name: 'CL_ABAP_TYPEDESCR', type: 'Class', uri: '/sap/bc/adt/oo/classes/cl_abap_typedescr' }];
+        },
+      }),
+    );
+    const res = await client.callTool({
+      name: 'search_objects',
+      arguments: { pattern: 'CL_ABAP*', maxResults: 5 },
+    });
+    expect(got).toEqual({ pattern: 'CL_ABAP*', opts: { maxResults: 5, types: undefined } });
+    expect(JSON.stringify(res.content)).toContain('CL_ABAP_TYPEDESCR');
+  });
+
+  it('search_objects + list_inactive_objects error clearly with no destination', async () => {
+    const client = await linkedClient(fakeEngine());
+    const s = await client.callTool({ name: 'search_objects', arguments: { pattern: 'X' } });
+    expect(JSON.stringify(s.content)).toContain('No ABAP destination is connected');
+    const i = await client.callTool({ name: 'list_inactive_objects', arguments: {} });
+    expect(JSON.stringify(i.content)).toContain('No ABAP destination is connected');
+  });
+
+  it('list_inactive_objects returns the engine result when connected', async () => {
+    const client = await linkedClient(
+      fakeEngine({ connectedDestination: 'A4H', listInactiveObjects: async () => [{ name: 'ZCL_DRAFT' }] }),
+    );
+    const res = await client.callTool({ name: 'list_inactive_objects', arguments: {} });
+    expect(JSON.stringify(res.content)).toContain('ZCL_DRAFT');
   });
 });

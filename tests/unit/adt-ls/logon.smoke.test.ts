@@ -47,6 +47,15 @@ describe('engine headless logon (needs adt-ls + ARC1_TEST_SAP_PASSWORD)', () => 
       const result = await engine.callTool('abap_creation-get_all_creatable_objects', { destination: 'A4H' });
       // Real ABAP object catalog from the backend (e.g. CLAS/OC, BDEF/BDO).
       expect(JSON.stringify(result)).toContain('creatableObjects');
+
+      // search_objects (LSP quickSearch) returns a real repository hit.
+      const hits = await engine.search('CL_ABAP_TYPEDESCR', { maxResults: 5 });
+      expect(hits.length).toBeGreaterThan(0);
+      expect(hits.some((h) => h.name?.toUpperCase() === 'CL_ABAP_TYPEDESCR')).toBe(true);
+      expect(hits[0].uri).toContain('/sap/bc/adt/');
+
+      // list_inactive_objects works (array; may be empty).
+      expect(Array.isArray(await engine.listInactiveObjects())).toBe(true);
     },
     120000,
   );
