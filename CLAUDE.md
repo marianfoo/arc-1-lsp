@@ -68,7 +68,9 @@ src/
 │   │                        #   server→client handlers) + extraEnv (JAVA_TOOL_OPTIONS truststore)
 │   ├── mcp-lifecycle.ts     # adtLs/mcp/{startMCPServer,stopMCPServer,setDestination}
 │   ├── mcp-federation.ts    # Streamable-HTTP client to adt-ls's own /mcp
-│   ├── repository.ts        # read-only LSP queries: quickSearch (SAPSearch) + getInactiveObjects
+│   ├── repository.ts        # LSP queries + file ops: quickSearch, getUsers, getLsUri (name→AFF URI),
+│   │                        #   readFile/writeFile/deleteFile + AFF-URI helpers
+│   ├── lifecycle.ts         # authoring loop: resolveAffUri + read/create/update/activate/test/delete
 │   ├── destinations.ts      # initializeService/create/ensureLoggedOn/getLogonInfo + headless
 │   │                        #   reentrance-ticket logon handler (ADR-0006)
 │   ├── tls-reverse-proxy.ts # TLS terminator: adt-ls → https://localhost → backend (direct | bridge)
@@ -81,14 +83,17 @@ src/
 │   ├── bridge.ts            # local HTTP forward proxy → BTP Connectivity (standard proxy, NOT CONNECT)
 │   └── types.ts             # BTPConfig / Destination / BTPProxyConfig
 └── server/
-    ├── config.ts            # loadConfig (CLI > env > default); SapTargetConfig + sapDestination
+    ├── config.ts            # loadConfig (CLI > env > default); SapTargetConfig + allowWrites/allowedPackages
+    ├── safety.ts            # write-safety: assertWriteAllowed + isPackageAllowed (gates mutating tools)
     ├── logger.ts            # stderr-only logger
     ├── auth.ts              # API-key edge auth (Bearer | x-api-key)
     ├── http.ts              # http-streamable transport + API-key gate + /healthz
     ├── engine.ts            # discover→spawn→startMCP→federate; planConnection + connect (direct|CC); search/listInactive
-    └── server.ts            # McpServer + read tools (health, list_destinations, list_creatable_objects,
+    └── server.ts            # McpServer + 16 tools: reads (health, list_destinations, list_creatable_objects,
     │                        #   search_objects, list_inactive_objects, list_users, list_generators,
-    │                        #   get_generator_schema, get_object_type_details, get_service_binding)
+    │                        #   get_generator_schema, get_object_type_details, get_service_binding, read_source)
+    │                        #   + authoring loop (create_object, update_source, activate_object,
+    │                        #   run_unit_tests, delete_object — gated by ARC1_ALLOW_WRITES + package allowlist)
 tests/unit/…                 # vitest; adt-ls/SAP-dependent tests are skipIf-gated
 docs/plans/…                 # ralphex plans (one per roadmap state)
 ```

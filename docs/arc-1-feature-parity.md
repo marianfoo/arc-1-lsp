@@ -4,21 +4,42 @@ What the two editions cover, and for every adt-ls-reachable capability: **is it
 wired, and why / why not.** All claims are backed by live probes against a4h
 (S/4HANA 2023, kernel 7.58), 2026-05-29.
 
-> **CORRECTION (2026-05-29):** an earlier version of this doc called `read_source`,
-> `create_object`, `activate`, and `run_unit_tests` *blocked by a workspace-model
-> limitation*. **That was wrong** — it was a wrong-URI-shape mistake on my part.
-> With the **canonical repotree/AFF URIs** they all work headless (proven below).
-> The real remaining gap is small: resolving an *existing* object's AFF URI by name.
+> **Status (2026-05-29):** the full ABAP **authoring loop is implemented** in
+> arc-1-lsp — read_source, create, update, activate, run_unit_tests, delete — pure
+> adt-ls, behind a write-safety layer, live-verified on a4h. The by-name resolver
+> (`getLsUri`) is solved. 16 tools total. (History: an earlier version of this doc
+> wrongly called these "blocked by a workspace-model limitation" — that was a
+> wrong-URI-shape mistake; the canonical repotree/AFF URIs work headless.)
 
 ## 1. The architectural difference (frames everything)
 
 | | arc-1 (main) | arc-1-lsp |
 |---|---|---|
 | ADT protocol | **hand-rolled** (CSRF, locking, XML, version quirks) | **delegated to SAP's `adt-ls`** |
-| Source files / LOC | 86 / ~38,600 | 21 / ~1,825 |
-| Test files | 98 | 18 |
-| Stage | production, write-capable, multi-user | early; 10 read tools live on CF |
+| Source files / LOC | 86 / ~38,600 | 24 / ~2,400 |
+| Test files | 98 | 22 |
+| Stage | production, write-capable, multi-user | read + authoring loop; 16 tools |
 | System-specific code to own | ~29 ADT files | ~zero |
+| Object-type scope | all (classic + modern) | **modern ABAP-Cloud only** (§4); classic → arc-1 |
+| Write safety | allowWrites + pkg allowlist + 7 scopes + deny-actions | allowWrites + pkg allowlist (v1) |
+
+## 1b. Feature matrix — arc-1's 12 intent tools → arc-1-lsp
+
+| arc-1 tool | arc-1-lsp | Notes |
+|---|---|---|
+| **SAPRead** (source) | ✅ `read_source` | modern types only; classic → arc-1 |
+| **SAPSearch** | ✅ `search_objects` | quickSearch |
+| **SAPWrite** (create/update/delete) | ✅ `create_object`/`update_source`/`delete_object` | modern types; behind `allowWrites`; include-aware. No method-surgery/AFF-validation/batch yet. |
+| **SAPActivate** | ✅ `activate_object` (+ `list_inactive_objects`) | returns syntax diagnostics |
+| **SAPDiagnose** (unit tests) | ✅ `run_unit_tests` | no dumps/traces/ATC |
+| **SAPManage** (partial) | ◑ `list_generators`/`get_generator_schema`/`get_object_type_details`/`get_service_binding` | no package CRUD / FLP / UI5 |
+| **SAPNavigate** (def/refs/where-used) | ❌ | `textDocument/*` unreached headless → arc-1 |
+| **SAPLint** (ATC/abaplint) | ❌ | `atc/runCheck` unreached; activate gives syntax diagnostics only |
+| **SAPQuery** (free SQL) | ❌ | absent in adt-ls → arc-1 |
+| **SAPTransport** | ❌ (◑ `transport-get` reachable, unwired) | clunky args; CTS write unwired |
+| **SAPGit** | ❌ | absent in adt-ls → arc-1 |
+| **SAPContext** (deps/compression) | ❌ | depends on navigation → arc-1 |
+| *(adt-ls extras)* | ✅ `health`, `list_destinations`, `list_creatable_objects`, `list_users` | |
 
 ## 2. The URI lesson (why earlier verdicts were wrong)
 
@@ -46,13 +67,13 @@ create class → `readFile` returns its source → `activate` → `{success:true
 | Generators — `abap_generators-*` | ✅ | ✅ `list_generators` / `get_generator_schema` | |
 | Inactive list — `getInactiveObjects` | ✅ | ✅ `list_inactive_objects` | |
 | Service bindings — `fetch_services` | ✅ | ✅ `get_service_binding` | |
-| **read_source** — `fileSystem/readFile` | ✅ **WORKS** | ❌ not wired | repotree `.clas.abap` URI → source. (Direct-GET shortcut REJECTED — no hybrid, ADR-0003.) |
-| **create_object** — `abap_creation-create_object` | ✅ **WORKS** | ❌ not wired (mutating) | `objectContent` = **JSON string** `{name,packageName,description}`; returns the AFF filePath. |
-| **update source** — `fileSystem/writeFile` | ✅ **WORKS** | ❌ not wired (mutating) | `{uri, content: <plain multi-line source>}` → null. (base64 fails: ABAP 255-char/line limit.) |
-| **activate** — `abap_activate_objects` | ✅ **WORKS** | ❌ not wired (mutating) | `uris:[<AFF filePath>]` → `{success:true,objectDiagnostics:[]}` |
-| **run_unit_tests** — `abap_run_unit_tests` | ✅ **WORKS** | ❌ not wired | `uris:[<AFF filePath>]` → results / "No tests found" |
-| **lock / unlock** — `fileSystem/{lockFile,unlockFile,getFileLockStatus}` | ✅ **WORKS** | ❌ (internal) | `{operationExecuted:true}` — for safe edits |
-| **delete** — `fileSystem/delete` | ✅ **WORKS** | ❌ not wired (mutating) | delete the **`.clas.json`** (not `.abap`) |
+| **read_source** — `fileSystem/readFile` | ✅ | ✅ `read_source` | by name via `getLsUri`; modern types only (§4); include-aware |
+| **create_object** — `abap_creation-create_object` | ✅ | ✅ `create_object` | `objectContent`=JSON string; returns AFF filePath; gated by `allowWrites`+package allowlist |
+| **update source** — `fileSystem/writeFile` | ✅ | ✅ `update_source` | plain source (not base64); include-aware; gated |
+| **activate** — `abap_activate_objects` | ✅ | ✅ `activate_object` | → `{success, diagnostics:[{range}]}` (syntax errors); gated |
+| **run_unit_tests** — `abap_run_unit_tests` | ✅ | ✅ `run_unit_tests` | by name; ungated |
+| **delete** — `fileSystem/delete` | ✅ | ✅ `delete_object` | deletes the `.clas.json`; gated |
+| lock / unlock — `fileSystem/{lockFile,unlockFile}` | ✅ | (internal) | adt-ls locks on write; not exposed as a tool |
 | validate creation — `abap_creation-run_validation` | needs `objectContent` | ❌ | same input as create |
 | **ATC** — `atc/runCheck` | ❌ unreached | ❌ | "Object to be checked could not be determined" even with the AFF URI (`{uris}` and `{uri}`). Param/context unknown. |
 | **navigation** — `textDocument/{documentSymbol,definition,hover}` | ❌ unclear | ❌ | `didOpen`-then-query **hangs** headless; not the path adt-ls uses. SAPNavigate = unreached. |
@@ -60,48 +81,39 @@ create class → `readFile` returns its source → `activate` → `{success:true
 | Free SQL / data preview | — | ❌ | **absent** from adt-ls |
 | Git (gCTS/abapGit) | — | ❌ | **absent** from adt-ls |
 
-## 4. The pure-adt-ls boundary (no hybrid — ADR-0003)
+## 4. The pure-adt-ls boundary (no hybrid — ADR-0003) + the type scope
 
-arc-1-lsp uses adt-ls **only** — no direct HTTP ADT, even for an easy win. Two
-consequences for the proven-but-unwired capabilities:
+arc-1-lsp uses adt-ls **only** — no direct HTTP ADT, even for an easy win. The
+by-name resolver that gates existing-object ops is **solved purely in adt-ls**:
+`repository/getLsUri {destination, adtUri}` maps a search-returned ADT path → the
+repotree AFF URI in one call (no tree walk). So `search_objects → getLsUri →
+readFile/writeFile/activate/delete` works by name. The direct-ADT-GET shortcut
+stays **rejected** (it'd be a hybrid) — and it's not needed.
 
-**Create-flow needs nothing extra.** `create_object` *returns* the AFF filePath, so
-**create → write source → lock → activate → run tests → delete** on objects
-arc-1-lsp creates threads the URI through with **no resolver and no hybrid** — fully
-in-bounds, works today. This is the sweet spot.
+**The real boundary is OBJECT TYPE.** adt-ls-for-VS-Code serves source only for
+**modern ABAP-Cloud types** (CLAS, INTF, DDLS, DCLS, SRVB, DDLX, BDEF, SRVD, …);
+**classic types** (PROG, TABL, FUGR, DOMA, DTEL, MSAG, TTYP, XSLT, …) return a
+`.jsonc` placeholder *"not supported in ADT in VS Code — use Eclipse."* So the
+authoring loop covers modern objects; classic ABAP is **arc-1's domain.**
 
-**Operating on EXISTING objects by name needs a pure resolver.** `readFile`/`writeFile`/
-`activate` all need the `abap:/repotree-v1/…` AFF URI, but `search_objects` returns
-an **ADT path** (`/sap/bc/adt/oo/classes/cl_x`), and the repotree is package-organized
-(deep; `readDirectory` children lack URIs; encoding is exact → fragile). So a
-**name→AFF-URI resolver** (pure adt-ls tree walk, or an unexplored `repository/getLsUri`)
-is the gate. The direct-ADT-GET shortcut that would trivially solve reads is
-**deliberately rejected** (it'd make this a hybrid). If the resolver proves too
-flaky, by-name source reads are simply **arc-1's job, not this edition's.**
+**Genuinely unreached headless (any type):** ATC (`atc/runCheck` can't determine the
+object), navigation/where-used (`textDocument/*` hangs). **Genuinely absent:** free
+SQL, git. Honest adt-ls limits → arc-1 territory.
 
-**Genuinely unreached headless:** ATC (`atc/runCheck` can't determine the object),
-navigation/where-used (`textDocument/*` hangs). **Genuinely absent:** free SQL, git.
-These are honest adt-ls limitations → arc-1 territory.
+## 5. What can be achieved in arc-1-lsp (pure adt-ls) — current state
 
-## 5. What can be achieved in arc-1-lsp (pure adt-ls)
+**Live, wired (16 tools):**
+- Reads: `search_objects`, `read_source`, `list_users`, `list_inactive_objects`,
+  `list_generators`, `get_generator_schema`, `get_object_type_details`,
+  `get_service_binding`, `list_creatable_objects`, `list_destinations`, `health`.
+- **Authoring loop (modern types, behind `ARC1_ALLOW_WRITES` + package allowlist):**
+  `create_object`, `update_source`, `activate_object`, `run_unit_tests`,
+  `delete_object` — full create→edit→activate→test→delete, by name, live-verified.
 
-**Now (10 tools, live):** all destination-scoped reads — search, users, generators,
-creatable types, object-type fields, service bindings, inactive list.
+**Not yet wired but reachable:** `transport-get` (clunky args), `run_validation`,
+richer SAPWrite (method surgery, AFF validation, batch — arc-1 has these).
 
-**Achievable, proven, unwired — the full object lifecycle:** `read_source`,
-`create`, `update`/`write`, `activate`, `run_unit_tests`, `delete` (+ locking).
-Gated by two enablers:
-1. a **write-safety layer** (arc-1 has `allowWrites` + package allowlist + scopes;
-   arc-1-lsp has none — needed before any mutating tool);
-2. for *existing* objects, the **name→AFF-URI resolver** (create-flow objects don't
-   need it).
-
-So the realistic next milestone is an **agent-driven authoring loop** — create a
-class/program, write its source, activate, run its tests — which is 100% pure
-adt-ls and needs only the write-safety layer. Reading/editing *arbitrary existing*
-objects additionally needs the resolver.
-
-**Out of scope for arc-1-lsp (→ arc-1):** ATC/lint, where-used/navigation, free SQL,
-git, and cheap by-name source browsing if the resolver doesn't pan out. These gaps
-are the honest map of adt-ls's headless limits — a feature of the comparison, not a
-defect to paper over with a hybrid.
+**Out of scope for arc-1-lsp (→ arc-1):** classic object types, ATC/lint,
+navigation/where-used, free SQL, git, transport *writes*, RAP generation (mutating,
+unwired). These are the honest map of adt-ls's headless limits — a feature of the
+comparison, not a defect to paper over with a hybrid.

@@ -123,14 +123,14 @@ for `writeFile`.
 - Always test mutations in **`$TMP`** and clean up (delete the `.json`); a hung spike
   skips its `finally` → orphan object. Verify with `search_objects ZCL_…*`.
 
-## 7. What this means for arc-1-lsp (achievable tools)
+## 7. What this means for arc-1-lsp (wired tools)
 
-- **Now (live, 10 tools):** all destination-scoped reads (search/users/generators/
-  creatable/service-bindings/inactive).
-- **Achievable, proven, pure adt-ls — the authoring loop:** read_source, create,
-  update, activate (+ diagnostics), run_unit_tests, delete — for **supported
-  (modern) types**, by name (via `getLsUri`). Needs a **write-safety layer**
-  (`allowWrites` + package allowlist + scopes — arc-1 has it, arc-1-lsp doesn't yet)
-  before exposing mutations.
+- **Reads (live):** search_objects, read_source, list_users, list_inactive_objects,
+  list_generators, get_generator_schema, get_object_type_details, get_service_binding,
+  list_creatable_objects, list_destinations, health.
+- **Authoring loop (live, modern types, behind `ARC1_ALLOW_WRITES` + package allowlist):**
+  create_object, update_source, activate_object, run_unit_tests, delete_object —
+  by name via `getLsUri`; full create→edit→activate→test→delete live-verified.
+  Safety: `src/server/safety.ts`. Lifecycle: `src/adt-ls/lifecycle.ts`.
 - **Out of scope (→ arc-1):** classic object types, ATC/lint, navigation/where-used,
-  free SQL, git.
+  free SQL, git, transport writes, RAP generation.

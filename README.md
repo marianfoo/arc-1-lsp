@@ -47,13 +47,17 @@ npm run build
 node dist/index.js          # or: npm run dev
 ```
 
-Point an MCP client at the process (stdio). Read tools: `health`,
+Point an MCP client at the process (stdio). **16 tools** — reads (`health`,
 `list_destinations`, `list_creatable_objects`, `search_objects`,
 `list_inactive_objects`, `list_users`, `list_generators`, `get_generator_schema`,
-`get_object_type_details`, `get_service_binding`. (Coverage vs the main ARC-1 +
-why other tools aren't wired: `docs/arc-1-feature-parity.md`.) To auto-connect a
-SAP system on startup, set the `ARC1_SAP_*` vars (see Config) — e.g. against an
-internet-reachable system:
+`get_object_type_details`, `get_service_binding`, `read_source`) and the **authoring
+loop** (`create_object`, `update_source`, `activate_object`, `run_unit_tests`,
+`delete_object`). The authoring/write tools cover **modern ABAP-Cloud object types**
+(class/interface/CDS/…; classic types → use main ARC-1) and require
+`ARC1_ALLOW_WRITES=true` + a package allowlist. Coverage vs main ARC-1 + why other
+tools aren't wired: `docs/arc-1-feature-parity.md`. To auto-connect a SAP system on
+startup, set the `ARC1_SAP_*` vars (see Config) — e.g. against an internet-reachable
+system:
 
 ```bash
 ARC1_SAP_HOST=a4h.marianzeis.de ARC1_SAP_PORT=50001 \
@@ -91,6 +95,8 @@ docker run -e ARC1_API_KEYS=devkey -p 8080:8080 arc-1-lsp:dev
 | `ARC1_TRANSPORT` / `--transport` | `stdio` | `stdio` \| `http-streamable` |
 | `ARC1_PORT` / `--port` | `8080` | HTTP port (http-streamable) |
 | `ARC1_API_KEYS` / `--api-keys` | (none) | edge auth: `key[:label][,key2…]`; empty disables auth (local only) |
+| `ARC1_ALLOW_WRITES` / `--allow-writes` | `false` | enable mutating tools (create/update/activate/delete) |
+| `ARC1_ALLOWED_PACKAGES` / `--allowed-packages` | `$TMP` | packages writes may target — exact / `PREFIX*` / `*` |
 | `ARC1_LOG_LEVEL` | `info` | `debug`\|`info`\|`warn`\|`error` (stderr only) |
 | **SAP connection — DIRECT mode** (internet-reachable backend) | | |
 | `ARC1_SAP_HOST` / `--sap-host` | — | backend host (e.g. `a4h.marianzeis.de`) |

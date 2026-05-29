@@ -1,5 +1,7 @@
 # Authoring loop — read/create/update/activate/test/delete (pure adt-ls)
 
+**STATUS: DONE (2026-05-29).** All 6 tools + write-safety implemented; full lifecycle live-verified on a4h. 16 tools, 127 unit + 2 gated tests.
+
 ## Overview
 Wire the proven, reachable adt-ls lifecycle into MCP tools, behind a write-safety
 layer. All pure adt-ls (ADR-0003). Supported object types only (modern ABAP-Cloud —
