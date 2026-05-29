@@ -22,6 +22,7 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
       runUnitTests: async () => ({ result: 'No tests found' }),
       deleteObject: async () => {},
     },
+    reconnect: async () => true,
     dispose: async () => {},
     ...overrides,
   };
@@ -161,7 +162,7 @@ describe('createMcpServer', () => {
     expect(got).toEqual({ name: 'abap_generators-list_generators', args: { destination: 'A4H' } });
   });
 
-  it('get_generator_schema passes generatorId + destination to the federated tool', async () => {
+  it('get_generator_schema passes generatorId + destination + default $TMP packageName', async () => {
     let got: { name?: string; args?: Record<string, unknown> } = {};
     const client = await linkedClient(
       fakeEngine({
@@ -173,7 +174,25 @@ describe('createMcpServer', () => {
       }),
     );
     await client.callTool({ name: 'get_generator_schema', arguments: { generatorId: 'odata_ui' } });
-    expect(got).toEqual({ name: 'abap_generators-get_schema', args: { destination: 'A4H', generatorId: 'odata_ui' } });
+    expect(got).toEqual({
+      name: 'abap_generators-get_schema',
+      args: { destination: 'A4H', generatorId: 'odata_ui', packageName: '$TMP' },
+    });
+  });
+
+  it('get_generator_schema forwards an explicit package as packageName', async () => {
+    let got: { args?: Record<string, unknown> } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        callTool: async (_name, args) => {
+          got = { args };
+          return { content: [{ type: 'text', text: '{}' }] };
+        },
+      }),
+    );
+    await client.callTool({ name: 'get_generator_schema', arguments: { generatorId: 'odata_ui', package: 'ZFOO' } });
+    expect(got.args).toEqual({ destination: 'A4H', generatorId: 'odata_ui', packageName: 'ZFOO' });
   });
 
   it('get_object_type_details passes objectType + default name placeholder', async () => {
@@ -241,7 +260,10 @@ describe('createMcpServer', () => {
       fakeEngine({
         lifecycle: {
           ...fakeEngine().lifecycle,
-          createObject: async (a: unknown) => ((got = a), { filePath: 'abap:/x' }),
+          createObject: async (a: unknown) => {
+            got = a;
+            return { filePath: 'abap:/x' };
+          },
         },
       }),
     );

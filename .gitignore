@@ -5,3 +5,4 @@ vendor/
 .env
 .arc1-cache.db
 .DS_Store
+.cursor/

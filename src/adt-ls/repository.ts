@@ -3,7 +3,7 @@
  * (`read_source` is NOT here — adt-ls's `fileSystem/readFile` needs VS Code's
  * workspace/tree model and returns empty headless; see `docs/adt-ls-tool-surface.md`.)
  */
-import type { AdtLsDriver } from './driver.js';
+import type { LspRequester } from './driver.js';
 
 /** A repository object hit from quickSearch. `uri` is the ADT object path. */
 export interface SearchReference {
@@ -24,7 +24,7 @@ export interface QuickSearchResult {
  * `destinationId`); `types` filters by object type (empty = all).
  */
 export function quickSearch(
-  driver: AdtLsDriver,
+  driver: LspRequester,
   params: { destination: string; pattern: string; maxResults?: number; types?: string[] },
 ): Promise<QuickSearchResult> {
   return driver.sendRequest<QuickSearchResult>('adtLs/repository/quickSearch', {
@@ -36,7 +36,7 @@ export function quickSearch(
 }
 
 /** List inactive (draft) objects on a destination. Uses `destinationId`. */
-export function getInactiveObjects(driver: AdtLsDriver, destinationId: string): Promise<unknown[]> {
+export function getInactiveObjects(driver: LspRequester, destinationId: string): Promise<unknown[]> {
   return driver.sendRequest<unknown[]>('adtLs/activation/getInactiveObjects', { destinationId });
 }
 
@@ -44,25 +44,25 @@ export function getInactiveObjects(driver: AdtLsDriver, destinationId: string): 
  * Resolve an ADT path (from a search result) to the canonical repotree AFF URI
  * that readFile/writeFile/activate need. Param key MUST be `adtUri` (verified).
  */
-export async function getLsUri(driver: AdtLsDriver, destination: string, adtUri: string): Promise<string> {
+export async function getLsUri(driver: LspRequester, destination: string, adtUri: string): Promise<string> {
   const r = await driver.sendRequest<{ uri?: string }>('adtLs/repository/getLsUri', { destination, adtUri });
   if (!r.uri) throw new Error(`getLsUri returned no uri for ${adtUri}`);
   return r.uri;
 }
 
 /** Read an AFF file's content (the object source) by its repotree URI. */
-export async function readFile(driver: AdtLsDriver, uri: string): Promise<string> {
+export async function readFile(driver: LspRequester, uri: string): Promise<string> {
   const r = await driver.sendRequest<{ content?: string }>('adtLs/fileSystem/readFile', { uri });
   return r.content ?? '';
 }
 
 /** Write an AFF file (update source). `content` must be plain multi-line text. */
-export function writeFile(driver: AdtLsDriver, uri: string, content: string): Promise<unknown> {
+export function writeFile(driver: LspRequester, uri: string, content: string): Promise<unknown> {
   return driver.sendRequest('adtLs/fileSystem/writeFile', { uri, content });
 }
 
 /** Delete an object via its AFF metadata (`.json`) URI. */
-export function deleteFile(driver: AdtLsDriver, uri: string): Promise<unknown> {
+export function deleteFile(driver: LspRequester, uri: string): Promise<unknown> {
   return driver.sendRequest('adtLs/fileSystem/delete', { uri });
 }
 
@@ -89,7 +89,7 @@ export interface UserRef {
 }
 
 /** List system users (e.g. for ownership/transport context). Uses `destination`. */
-export async function getUsers(driver: AdtLsDriver, destination: string): Promise<UserRef[]> {
+export async function getUsers(driver: LspRequester, destination: string): Promise<UserRef[]> {
   const r = await driver.sendRequest<{ users?: UserRef[] }>('adtLs/repository/getUsers', { destination });
   return r.users ?? [];
 }

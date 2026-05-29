@@ -30,6 +30,15 @@ export interface AdtLsInitializeResult {
 export type ServerRequestHandler = (params: unknown) => unknown | Promise<unknown>;
 
 /**
+ * The LSP request channel alone. Consumers that only send requests (repository
+ * queries, the authoring lifecycle) depend on this minimal surface, so a
+ * session-retry wrapper — or a test fake — can stand in for the full driver.
+ */
+export interface LspRequester {
+  sendRequest<T = unknown>(method: string, params?: unknown): Promise<T>;
+}
+
+/**
  * Route a server→client request to a registered handler, with safe defaults.
  * Pure (no I/O) so it can be unit-tested directly.
  * - registered handler wins (e.g. `adtLs/destinations/requestBrowserBasedLogon`)
@@ -59,7 +68,7 @@ function timeoutReject(ms: number): Promise<never> {
   });
 }
 
-export class AdtLsDriver {
+export class AdtLsDriver implements LspRequester {
   private child?: ChildProcess;
   private server?: net.Server;
   private conn?: MessageConnection;

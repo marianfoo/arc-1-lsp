@@ -26,11 +26,12 @@ import {
   makeReentranceLogonHandler,
 } from '../adt-ls/destinations.js';
 import { resolveAdtLsPath } from '../adt-ls/discovery.js';
-import { AdtLsDriver } from '../adt-ls/driver.js';
+import { AdtLsDriver, type LspRequester } from '../adt-ls/driver.js';
 import { type Lifecycle, createLifecycle } from '../adt-ls/lifecycle.js';
 import { AdtLsMcpClient, type McpTool } from '../adt-ls/mcp-federation.js';
 import { setMcpDestination, startMcpServer, stopMcpServer } from '../adt-ls/mcp-lifecycle.js';
 import { type SearchReference, type UserRef, getInactiveObjects, getUsers, quickSearch } from '../adt-ls/repository.js';
+import { isLoggedOffFederatedResult, makeRelogon, makeWithRelogon } from '../adt-ls/session-retry.js';
 import { type TlsReverseProxy, startTlsReverseProxy } from '../adt-ls/tls-reverse-proxy.js';
 import { type ConnectivityBridge, startConnectivityBridge } from '../btp/bridge.js';
 import { createConnectivityProxy } from '../btp/connectivity.js';
@@ -61,6 +62,12 @@ export interface Engine {
   lifecycle: Lifecycle;
   /** The destination logged on at startup, if any. */
   connectedDestination?: string;
+  /**
+   * Force a SAP re-logon on the connected destination; resolves true when the
+   * session is live afterwards. Invoked automatically on a detected "logged off"
+   * (see the session-retry wrappers), and exposed for ops / manual recovery.
+   */
+  reconnect(): Promise<boolean>;
   dispose(): Promise<void>;
 }
 
@@ -141,9 +148,42 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     }
   }
 
+  // Self-healing SAP session: the backend security session behind adt-ls expires
+  // on inactivity; afterwards every call fails with "logged off" until a reconnect
+  // (previously: restart the instance). On detecting that, re-fire the proven
+  // startup logon (ensureLoggedOn re-triggers our still-registered reentrance
+  // handler) and retry the call once. Wrap BOTH channels — federated MCP tool
+  // calls and raw LSP requests — since either can hit the dead session.
+  const relogon = makeRelogon(async () => {
+    if (!connectedDestination) return false;
+    logger.warn(`engine: SAP session lost — re-logging on to ${connectedDestination}`);
+    try {
+      const logon = await ensureLoggedOn(driver, connectedDestination);
+      if (logon.logonState !== 'connected') {
+        logger.error(`engine: re-logon to ${connectedDestination} returned ${logon.logonState}`);
+        return false;
+      }
+      // Re-point adt-ls's MCP server at the refreshed session (idempotent, best-effort).
+      await setMcpDestination(driver, connectedDestination).catch((e) =>
+        logger.warn(`engine: re-bind after re-logon failed: ${e instanceof Error ? e.message : String(e)}`),
+      );
+      logger.info(`engine: re-logon to ${connectedDestination} succeeded`);
+      return true;
+    } catch (e) {
+      logger.error(`engine: re-logon failed: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  });
+  const withRelogon = makeWithRelogon(relogon);
+  const sessionCallTool = (name: string, args: Record<string, unknown> = {}) =>
+    withRelogon(() => federation.callTool(name, args), isLoggedOffFederatedResult);
+  const sessionRequester: LspRequester = {
+    sendRequest: <T>(method: string, params?: unknown) => withRelogon<T>(() => driver.sendRequest<T>(method, params)),
+  };
+
   const lifecycle = createLifecycle({
-    driver,
-    callTool: (name, args = {}) => federation.callTool(name, args),
+    driver: sessionRequester,
+    callTool: sessionCallTool,
     destination: () => connectedDestination,
     safety: { allowWrites: config.allowWrites, allowedPackages: config.allowedPackages },
   });
@@ -157,13 +197,13 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
       connectedDestination,
     }),
     listTools: () => federation.listTools(),
-    callTool: (name, args = {}) => federation.callTool(name, args),
+    callTool: (name, args = {}) => sessionCallTool(name, args),
     setDestination: async (destinationId) => {
       await setMcpDestination(driver, destinationId);
     },
     search: async (pattern, opts = {}) => {
       if (!connectedDestination) throw new Error('No ABAP destination is connected.');
-      const r = await quickSearch(driver, {
+      const r = await quickSearch(sessionRequester, {
         destination: connectedDestination,
         pattern,
         maxResults: opts.maxResults,
@@ -173,12 +213,13 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     },
     listInactiveObjects: async () => {
       if (!connectedDestination) throw new Error('No ABAP destination is connected.');
-      return getInactiveObjects(driver, connectedDestination);
+      return getInactiveObjects(sessionRequester, connectedDestination);
     },
     listUsers: async () => {
       if (!connectedDestination) throw new Error('No ABAP destination is connected.');
-      return getUsers(driver, connectedDestination);
+      return getUsers(sessionRequester, connectedDestination);
     },
+    reconnect: () => relogon(),
     dispose: async () => {
       await stopMcpServer(driver).catch(() => {});
       await driver.dispose();

@@ -51,7 +51,7 @@ silent empty result. **Don't hand-build URIs — use the one `getLsUri`/`create`
 | List users | LSP `repository/getUsers` `{destination}` | ✅ | wired `list_users` |
 | Creatable types | MCP `abap_creation-get_all_creatable_objects` | ✅ | wired `list_creatable_objects` — = the supported-type set |
 | Object-type fields | MCP `abap_creation-get_object_type_details` `{destination,objectType,name}` | ✅ | wired `get_object_type_details` → `{fields}` |
-| Generators | MCP `abap_generators-list_generators`/`get_schema` | ✅ | wired `list_generators`/`get_generator_schema` |
+| Generators | MCP `abap_generators-list_generators`/`get_schema` | ✅ | wired `list_generators`/`get_generator_schema`. ⚠ `get_schema` **requires `packageName`** ("packageName is missing or empty" without it) — `get_generator_schema` defaults it to `$TMP`. |
 | Service binding info | MCP `abap_business_services-fetch_services` `{destination,serviceBindingName}` | ✅ | wired `get_service_binding` |
 | Inactive list | LSP `activation/getInactiveObjects` `{destinationId}` | ✅ | wired `list_inactive_objects` (returned `[]` even mid-edit — semantics unclear) |
 | **Resolve name→URI** | LSP `repository/getLsUri` `{destination,adtUri}` | ✅ | §1 — the key enabler, unwired |
@@ -123,7 +123,38 @@ for `writeFile`.
 - Always test mutations in **`$TMP`** and clean up (delete the `.json`); a hung spike
   skips its `finally` → orphan object. Verify with `search_objects ZCL_…*`.
 
-## 7. What this means for arc-1-lsp (wired tools)
+## 7. SAP session lifecycle & self-heal (logged-off recovery)
+
+After the reentrance-ticket logon (§ headless-notes), adt-ls holds a SAP **security
+session** for the destination. That session **expires server-side on inactivity**
+(SAP default ~hours; profile-dependent). Once it lapses, **every** ADT call — LSP
+*and* federated MCP — fails with **"Your user was logged off"** until the
+destination logs on again. Observed live on the deployed CF instance: after the
+instance sat idle, `search_objects` / `list_users` / generators all returned
+logged-off, and only an instance restart recovered it.
+
+**Recovery (verified mechanism):** the reentrance-ticket handler stays registered
+on the driver for the process lifetime, so calling `adtLs/destinations/ensureLoggedOn`
+**again** re-fires it and re-establishes the session — the exact path proven at
+startup. There is **no** `logoff`/`disconnect` method; `ensureLoggedOn` is the lever.
+adt-ls also emits `adtLs/destinations/logonStateChanged` (`pending`→`connected`)
+as the state transitions.
+
+**What arc-1-lsp does (`src/adt-ls/session-retry.ts` + `engine.ts`):** both channels
+are wrapped so a detected logged-off failure triggers one `ensureLoggedOn` +
+`setMcpDestination` re-logon and **retries the call once**. Concurrent failures
+share a single in-flight re-logon. Exposed as `engine.reconnect()` for ops/manual
+recovery. Detection matches the SAP "logged off" phrase, session-expiry variants,
+and explicit HTTP 401 (not bare `401`, to avoid false positives).
+
+> Residual uncertainty: forcing a *real* server-side expiry in a unit/spike is not
+> cheap (full inactivity timeout), so the heal-of-a-dead-session path is verified by
+> reuse of the proven startup logon + the gated `engine.reconnect()` live test
+> (`tests/unit/server/engine-reconnect.smoke.test.ts`, idempotent re-logon against
+> a4h) rather than a forced-expiry test. If a future adt-ls makes `ensureLoggedOn`
+> no-op when it *believes* it is connected, add a getLogonInfo-gated forced re-auth.
+
+## 8. What this means for arc-1-lsp (wired tools)
 
 - **Reads (live):** search_objects, read_source, list_users, list_inactive_objects,
   list_generators, get_generator_schema, get_object_type_details, get_service_binding,

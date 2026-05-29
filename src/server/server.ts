@@ -130,12 +130,23 @@ export function createMcpServer(engine: Engine): McpServer {
         'Get the input schema for a specific object generator (use `generatorId` from list_generators). Read-only.',
       inputSchema: {
         generatorId: z.string().describe('Generator id from list_generators.'),
+        package: z
+          .string()
+          .optional()
+          .describe('Target package the schema is contextualized for (adt-ls requires one; default "$TMP").'),
       },
     },
-    async ({ generatorId }) => {
+    async ({ generatorId, package: pkg }) => {
       const dest = engine.connectedDestination;
       if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
-      return text(await engine.callTool('abap_generators-get_schema', { destination: dest, generatorId }));
+      // adt-ls's get_schema requires a packageName (errors "packageName is missing or empty" without it).
+      return text(
+        await engine.callTool('abap_generators-get_schema', {
+          destination: dest,
+          generatorId,
+          packageName: pkg ?? '$TMP',
+        }),
+      );
     },
   );
 

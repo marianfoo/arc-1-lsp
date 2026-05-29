@@ -29,8 +29,7 @@ export function assertWriteAllowed(safety: WriteSafety, opts: { action: string; 
   }
   if (opts.packageName && !isPackageAllowed(safety.allowedPackages, opts.packageName)) {
     throw new Error(
-      `Package "${opts.packageName}" is not in the write allowlist [${safety.allowedPackages.join(', ')}]. ` +
-        'Set ARC1_ALLOWED_PACKAGES to permit it.',
+      `Package "${opts.packageName}" is not in the write allowlist [${safety.allowedPackages.join(', ')}]. Set ARC1_ALLOWED_PACKAGES to permit it.`,
     );
   }
 }

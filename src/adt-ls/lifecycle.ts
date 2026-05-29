@@ -6,7 +6,7 @@ import { type WriteSafety, assertWriteAllowed } from '../server/safety.js';
  * object types adt-ls serves headless work; classic types surface a clear error.
  * See docs/adt-ls-reference.md.
  */
-import type { AdtLsDriver } from './driver.js';
+import type { LspRequester } from './driver.js';
 import {
   deleteFile,
   getLsUri,
@@ -33,7 +33,7 @@ export interface CreateResult {
 }
 
 export interface LifecycleDeps {
-  driver: AdtLsDriver;
+  driver: LspRequester;
   callTool: (name: string, args: Record<string, unknown>) => Promise<unknown>;
   /** The connected destination id, or undefined. */
   destination: () => string | undefined;
