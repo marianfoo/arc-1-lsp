@@ -40,6 +40,23 @@ node dist/index.js          # or: npm run dev
 Point an MCP client at the process (stdio). Foundation tools: `health`,
 `list_destinations`.
 
+## Run (Docker / http-streamable)
+
+The container bundles a **build-time-injected** linux adt-ls and serves MCP over
+http-streamable behind an API key — this is the artifact deployed to BTP CF.
+
+```bash
+# stage the linux adt-ls (admin provides the licensed VSIX in vendor/)
+node scripts/extract-adt-ls.mjs
+# build the linux/amd64 image (host-builds dist; only prod deps + adt-ls are amd64)
+IMAGE=arc-1-lsp:dev bash scripts/docker-build.sh
+# run
+docker run -e ARC1_API_KEYS=devkey -p 8080:8080 arc-1-lsp:dev
+```
+
+`GET /healthz` (no auth) for health checks; `POST /mcp` with
+`Authorization: Bearer <key>` for MCP. Native deps: see `docs/native-deps.md`.
+
 ## Config (CLI > env > default)
 
 | Env / flag | Default | Meaning |
