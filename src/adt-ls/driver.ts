@@ -101,6 +101,11 @@ export class AdtLsDriver {
       rootUri: null,
       workspaceFolders: null,
       capabilities: {},
+      // REQUIRED for any backend HTTP: adt-ls's UserAgentUtil builds the
+      // User-Agent from initializationOptions.userAgentInfos; if absent, its
+      // static initializer NPEs and every HTTP destination operation fails with
+      // "Could not initialize class …HttpRequestHeaderUtil". (Verified 2026-05-29.)
+      initializationOptions: { userAgentInfos: [{ name: 'arc-1-lsp', version: '0.0.1' }] },
     })) as AdtLsInitializeResult;
     this.conn.sendNotification('initialized', {});
     this.initializeResult = result;
