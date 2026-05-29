@@ -1,0 +1,9 @@
+.git
+node_modules
+tests
+docs
+src
+*.md
+.env*
+vendor/*.vsix
+vendor/.vsix-extract

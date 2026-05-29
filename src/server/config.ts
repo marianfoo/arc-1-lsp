@@ -15,6 +15,8 @@ export interface Arc1LspConfig {
   transport: Transport;
   /** HTTP port when transport is http-streamable. */
   httpPort: number;
+  /** API keys for the HTTP edge (comma-separated `key` or `key:label`); empty = auth disabled. */
+  apiKeys?: string;
 }
 
 function flag(argv: string[], name: string): string | undefined {
@@ -38,5 +40,6 @@ export function loadConfig(
     adtLsMcpToken: flag(argv, 'adt-ls-mcp-token') ?? env.ARC1_ADT_LS_MCP_TOKEN,
     transport,
     httpPort: httpPort ? Number(httpPort) : 8080,
+    apiKeys: flag(argv, 'api-keys') ?? env.ARC1_API_KEYS,
   };
 }
