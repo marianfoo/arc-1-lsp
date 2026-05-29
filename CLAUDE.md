@@ -20,15 +20,23 @@ so understand the **why** before changing anything:
   setup, licensing, the private LSP protocol, TLS — what to re-verify against the
   installed adt-ls version, and what would let us delete complexity.
 - **`docs/journey.md`** — the chronological story incl. dead-ends (don't re-walk them).
-- **`docs/adt-ls-headless-notes.md`** — the reverse-engineered headless connection
+- **`docs/adt-ls-headless-notes.md`** — the reverse-engineered headless **connection**
   recipe (initialize/userAgentInfos, reentrance-ticket logon, HTTPS requirement).
-- **`docs/adt-ls-tool-surface.md`** — what's reachable headless for building tools:
-  the 14 federated MCP tools, the LSP method map, quickSearch's exact params, and
-  the `read_source` HARD BLOCKER (readFile needs VS Code's workspace/tree model).
+- **`docs/adt-ls-reference.md`** — ⭐ THE authoritative, live-verified **capability
+  map**: the URI model + the `getLsUri` name→URI resolver, the full method/tool
+  matrix, the object-type support boundary (modern ABAP-Cloud types served; classic
+  → "use Eclipse"), the proven create→edit→activate→test→delete lifecycle, and
+  gotchas. **Read this before adding any adt-ls-backed tool**, and **record new adt-ls
+  findings here** (exact call + observed result). `adt-ls-tool-surface.md` is a stub → this.
 - **`docs/arc-1-feature-parity.md`** — arc-1 vs arc-1-lsp coverage + per-capability
-  "implemented? why/why-not" (the workspace-model block gates read/test/activate/
-  navigation alike). Read before adding tools, to know what's actually reachable.
+  "implemented? why/why-not". Read before adding tools, to know what's in scope.
 - **`docs/plans/`** — ralphex plans (completed + in-progress) per roadmap state.
+
+**Documentation convention for adt-ls findings:** whenever a spike/test reveals how
+an adt-ls call behaves (params, URI shape, what works/fails headless), update
+`docs/adt-ls-reference.md` with the exact call + observed result/error as evidence.
+That doc is the durable memory — keep it correct over clever. Decisions → an ADR;
+the arc-1 comparison → feature-parity; the connection recipe → headless-notes.
 
 ## Design principles (non-negotiable)
 
