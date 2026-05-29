@@ -1,0 +1,7 @@
+node_modules/
+dist/
+vendor/adt-ls/
+*.log
+.env
+.arc1-cache.db
+.DS_Store
