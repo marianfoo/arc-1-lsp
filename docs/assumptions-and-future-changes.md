@@ -17,8 +17,11 @@ Installed reference at time of writing: `sapse.adt-vscode` **1.0.0**, adt-ls
 - **If SAP adds** a non-interactive auth (basic/token/client-credentials) or a
   documented "headless logon" → **drop the browser-emulation and most of the
   proxy**; adt-ls could authenticate directly. **Re-check every adt-ls release.**
-- **Where it lives:** `src/adt-ls/driver.ts` (the `requestBrowserBasedLogon`
-  handler, once implemented), `docs/adt-ls-headless-notes.md`.
+- **Status: IMPLEMENTED + PROVEN** (local + BTP CF). `authenticationKind` MUST be
+  `reentranceTicket` (basicAuth fails session dispatch); delivery is fire-and-forget.
+- **Where it lives:** `src/adt-ls/destinations.ts` (`makeReentranceLogonHandler` +
+  `performReentranceLogon`), wired via `driver.setRequestHandler` in
+  `src/server/engine.ts`. Recipe: `docs/adt-ls-headless-notes.md`.
 
 ## 2. Principal propagation (per-user identity)
 - **Current:** adt-ls is single-session; no hook to inject a per-user token. PP is
@@ -36,6 +39,14 @@ Installed reference at time of writing: `sapse.adt-vscode` **1.0.0**, adt-ls
   Location_ID` using **standard HTTP-proxy protocol (NOT CONNECT)** — the
   hard-won lesson from ARC-1's `doProxyRequest`.
 - **If SAP adds** native connectivity support to adt-ls → no bridge needed.
+- **Status:** bridge implemented (`src/btp/bridge.ts`) + wired into the engine's CC
+  path (`planConnection` connectivity mode → `lookupDestination` → bridge →
+  reverse-proxy `forwardProxy`). **NOT yet deployed/verified end-to-end** — needs a
+  running Cloud Connector + bound `connectivity`+`destination` + a BTP destination.
+  v1 ships in DIRECT mode against internet-reachable a4h (no CC). The reverse
+  proxy's upstream sends the destination's `URL` scheme to the bridge; the CC
+  virtual host must be **HTTP** (the connectivity proxy 405s on CONNECT, so HTTPS
+  virtual hosts won't tunnel) — verify this when wiring CC.
 - **Setup that can change:** the bound services (`connectivity`, `destination`),
   the destination names (`SAP_TRIAL` basic/CC, `SAP_TRIAL_PP` principal-propagation),
   the CC virtual host mapping. These are admin-configured in the BTP subaccount and
@@ -65,17 +76,41 @@ Installed reference at time of writing: `sapse.adt-vscode` **1.0.0**, adt-ls
   `sapse.adt-vscode` version**; detect + warn on mismatch.
 - **If SAP publishes** the protocol/types → adopt them, drop reverse-engineering.
 
-## 7. TLS / certificates
-- **Current:** adt-ls requires HTTPS; a4h:50001 uses a **self-signed** cert →
-  adt-ls's JRE must trust it (truststore via `-Djavax.net.ssl.trustStore`).
-- **Smoother path:** BTP ABAP systems (e.g. `H01`) have **valid CA certs** → no
-  trust setup; but their reentrance needs OAuth, not basic auth (trade-off).
+## 7. TLS / certificates — SOLVED by the reverse proxy (ADR-0005)
+- **Current:** adt-ls requires HTTPS *and* validates the backend cert's hostname.
+  A truststore alone fixes **trust** but not **hostname** (SAP's default cert is
+  `CN=*.dummy.nodomain`; adt-ls's Apache client ignores
+  `-Djdk.internal.httpclient.disableHostnameVerification`). **Solution:** the
+  local **TLS reverse proxy** presents a `CN=localhost` cert (added to a truststore
+  built from adt-ls's own JRE cacerts, so public CAs still validate) and
+  re-originates to the backend with verification off (our Node code). Implemented
+  in `src/adt-ls/{tls-reverse-proxy,cert}.ts`; the truststore is ephemeral
+  (rebuilt per startup into a temp dir).
+- **Runtime deps:** `openssl` (cert gen — in the Dockerfile) + `keytool` (ships
+  with adt-ls's JRE). a4h's 1024-bit RSA cert draws a keytool warning but is
+  accepted by JRE 21 (watch: a future JRE may reject 1024-bit — then a4h needs a
+  fresh cert, or use a valid-cert BTP system).
+- **Smoother path:** BTP ABAP systems (e.g. `H01`) have **valid CA certs**; the
+  proxy could connect with verification on — but their reentrance needs OAuth, not
+  basic auth (trade-off, plan 05).
 
 ## 8. Target systems (test/validation)
 - **a4h** = on-prem S/4HANA 2023 trial, `https://a4h.marianzeis.de:50001`, user
-  `DEVELOPER`, client 001, self-signed cert, internet-reachable (also via CC from
-  BTP). Easiest for reentrance emulation (basic auth → ticket works).
+  `DEVELOPER`, client 001, self-signed cert, **internet-reachable** (also via CC
+  from BTP). Easiest for reentrance emulation (basic auth → ticket works). **This
+  is why v1 deploys DIRECT on CF** — CF reaches a4h:50001 over the internet, no CC.
 - **H01** = the user's BTP ABAP system, `https://<guid>.abap.us10.hana.ondemand.com`,
   reentranceticket, valid cert — the "native" adt-ls target, but OAuth-based.
 - Credentials are **never committed**; passed via env / `cf set-env`. (The
-  `DEVELOPER` password appeared in chat during research — rotate it.)
+  `DEVELOPER` password appeared in chat during research — **rotate it**.)
+
+## 9. BTP deploy environment (can drift)
+- **Current:** org `Marian Zeis_dev-9li7mzug` / space `abap-dev` on `cf
+  api.cf.us10-001.hana.ondemand.com`; app `arc-1-lsp` (docker, 2G). Image
+  `ghcr.io/marianfoo/arc-1-lsp:0.0.1` is **private** → CF pulls with
+  `CF_DOCKER_PASSWORD=$(gh auth token)` (make the ghcr package public to drop this).
+- **Org memory quota is tight** — `cf stop arc-1-lsp` before a re-push to avoid the
+  transient 2×2G (old + new) that trips `memory limit exceeded`. `arc1-301-*` apps
+  share the space.
+- `cf push -f manifest.yml` shows a manifest diff but preserves `cf set-env` vars
+  not listed in the manifest (verified). Keep secrets in `cf set-env`, not the manifest.

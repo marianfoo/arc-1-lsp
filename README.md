@@ -9,14 +9,24 @@ system-specific.
 
 ```
 agent (Claude / Copilot / Cursor)
-   │  MCP (stdio today; http-streamable for CF deploy)
+   │  MCP (stdio | http-streamable)
    ▼
-arc-1-lsp  (Node/TS — discovers, spawns & supervises adt-ls; auth + scopes)
-   ├─ LSP over pipe ───────────▶ adt-ls (headless, BYO)   ← bootstrap + (later) language intelligence
+arc-1-lsp  (Node/TS — discovers, spawns & supervises adt-ls; auth + scopes; owns SAP auth)
+   ├─ LSP over pipe ───────────▶ adt-ls (headless, BYO)   ← bootstrap, destinations, logon, language intelligence
    └─ HTTP localhost ─────────▶ adt-ls's own /mcp         ← federated tools
-                                      │ RFC / HTTP (+ Cloud Connector on BTP)
-                                      ▼  SAP ABAP backend
+                                      │ HTTPS
+                                      ▼
+                          TLS reverse proxy (CN=localhost, in arc-1-lsp)
+                                      │  DIRECT ───────────────▶ SAP ABAP (internet-reachable)
+                                      └  CC ─▶ connectivity bridge ─▶ BTP Connectivity ─▶ Cloud Connector ─▶ SAP ABAP
 ```
+
+adt-ls requires an HTTPS backend and validates its hostname; SAP's default
+self-signed cert (`CN=*.dummy.nodomain`) fails that. So arc-1-lsp runs a local
+**TLS-terminating reverse proxy** (cert `CN=localhost`, trusted via a truststore
+built from adt-ls's own JRE) and re-originates to the real backend — directly, or
+through the connectivity bridge on BTP. Logon is **headless reentrance-ticket**
+emulation (no browser). See `docs/adt-ls-headless-notes.md` + `docs/adr/`.
 
 ## Bring your own `adt-ls` (never redistributed)
 
@@ -37,8 +47,18 @@ npm run build
 node dist/index.js          # or: npm run dev
 ```
 
-Point an MCP client at the process (stdio). Foundation tools: `health`,
-`list_destinations`.
+Point an MCP client at the process (stdio). Tools: `health`, `list_destinations`,
+`list_creatable_objects`. To auto-connect a SAP system on startup, set the
+`ARC1_SAP_*` vars (see Config) — e.g. against an internet-reachable system:
+
+```bash
+ARC1_SAP_HOST=a4h.marianzeis.de ARC1_SAP_PORT=50001 \
+ARC1_SAP_USER=DEVELOPER ARC1_SAP_PASSWORD=… ARC1_SAP_DESTINATION=A4H \
+node dist/index.js
+```
+
+`health` then reports `connectedDestination`, and `list_creatable_objects` returns
+the system's object catalog.
 
 ## Run (Docker / http-streamable)
 
@@ -64,9 +84,24 @@ docker run -e ARC1_API_KEYS=devkey -p 8080:8080 arc-1-lsp:dev
 | `ARC1_ADT_LS_PATH` / `--adt-ls-path` | (discovered) | explicit adt-ls binary |
 | `ARC1_ADT_LS_MCP_PORT` / `--adt-ls-mcp-port` | `2240` | port for adt-ls's own MCP server |
 | `ARC1_ADT_LS_MCP_TOKEN` / `--adt-ls-mcp-token` | (generated) | bearer for adt-ls's MCP server |
-| `ARC1_TRANSPORT` / `--transport` | `stdio` | `stdio` \| `http-streamable` (http lands in the deploy plan) |
+| `ARC1_TRANSPORT` / `--transport` | `stdio` | `stdio` \| `http-streamable` |
 | `ARC1_PORT` / `--port` | `8080` | HTTP port (http-streamable) |
+| `ARC1_API_KEYS` / `--api-keys` | (none) | edge auth: `key[:label][,key2…]`; empty disables auth (local only) |
 | `ARC1_LOG_LEVEL` | `info` | `debug`\|`info`\|`warn`\|`error` (stderr only) |
+| **SAP connection — DIRECT mode** (internet-reachable backend) | | |
+| `ARC1_SAP_HOST` / `--sap-host` | — | backend host (e.g. `a4h.marianzeis.de`) |
+| `ARC1_SAP_PORT` / `--sap-port` | — | backend **HTTPS** port (e.g. `50001`) |
+| `ARC1_SAP_USER` / `--sap-user` | — | SAP user (reentrance ticket is fetched with these creds) |
+| `ARC1_SAP_PASSWORD` / `--sap-password` | — | SAP password (set via env / `cf set-env`, never committed) |
+| `ARC1_SAP_DESTINATION` / `--sap-destination` | `SAP` | adt-ls destination id (DIRECT) **or** BTP destination name (CC) |
+| `ARC1_SAP_CLIENT` / `--sap-client` | `001` | SAP client |
+| `ARC1_SAP_INSECURE` / `--sap-insecure` | `true` | accept the backend's self-signed cert (backend TLS is ours) |
+| **SAP connection — CC mode** (on-prem via Cloud Connector) | | |
+| `ARC1_SAP_DESTINATION` | — | BTP Destination Service name; resolved when `connectivity` is bound |
+
+All four DIRECT vars (`HOST`/`PORT`/`USER`/`PASSWORD`) must be set to auto-connect.
+On BTP with a bound `connectivity` service, `ARC1_SAP_DESTINATION` alone selects
+CC mode (the destination supplies host/creds/Cloud-Connector location).
 
 ## Deploy to BTP Cloud Foundry
 
@@ -75,23 +110,38 @@ git — the API key and the registry pull token are passed at deploy time:
 
 ```bash
 docker push ghcr.io/marianfoo/arc-1-lsp:0.0.1
-CF_DOCKER_PASSWORD=$(gh auth token) cf push -f manifest.yml --no-start
+# SAP connection + API key are secrets → set via cf set-env (never committed):
 cf set-env arc-1-lsp ARC1_API_KEYS "$(openssl rand -hex 16)"
-CF_DOCKER_PASSWORD=$(gh auth token) cf start arc-1-lsp
+cf set-env arc-1-lsp ARC1_SAP_HOST a4h.marianzeis.de
+cf set-env arc-1-lsp ARC1_SAP_PORT 50001
+cf set-env arc-1-lsp ARC1_SAP_USER DEVELOPER
+cf set-env arc-1-lsp ARC1_SAP_PASSWORD <secret>
+cf set-env arc-1-lsp ARC1_SAP_DESTINATION A4H
+# re-push (stop first if the org memory quota is tight — avoids transient 2×2G):
+cf stop arc-1-lsp
+CF_DOCKER_PASSWORD=$(gh auth token) cf push arc-1-lsp -f manifest.yml
 ```
 
 Live (us10 free-tier): `https://arc-1-lsp.cfapps.us10-001.hana.ondemand.com`
-— `/healthz` (200), `/mcp` (API-key gated). `health` confirms the embedded
-adt-ls is up. `list_destinations` is empty until a destination is bound — the
-Cloud-Connector bridge for a4h is the next milestone.
+— `/healthz` (200), `/mcp` (API-key gated). `cf logs` shows
+`engine: connected destination A4H`; the MCP `health` tool reports
+`connectedDestination`, and `list_creatable_objects` returns the live a4h catalog.
+
+For **on-prem via Cloud Connector** (CC mode): bind `connectivity` + `destination`
+services, set only `ARC1_SAP_DESTINATION <btp-destination-name>` (drop the direct
+`ARC1_SAP_HOST/PORT/USER/PASSWORD`), restage — the engine resolves the destination
+and routes through the bridge automatically.
 
 ## Status & roadmap
 
-Foundation (this milestone) is **green**: spawn adt-ls headless → start its MCP
-over LSP → federate its 14 tools → expose a minimal arc-1-shaped MCP server.
-Verified end-to-end locally on macOS against a real `adt-ls`.
+**Connected on BTP CF (Step 4) — green.** spawn adt-ls headless → start its MCP
+over LSP → federate its 14 tools → build TLS material from adt-ls's JRE → start the
+reverse proxy → **headless reentrance logon** → expose an arc-1-shaped MCP server
+that returns real backend data. Verified live locally (macOS) and on BTP CF against
+a4h (DIRECT mode).
 
-Roadmap (see `docs/plans/`): containerize (BYO linux adt-ls) → deploy to BTP CF
-(single technical user) → expand/curate tools → per-user principal propagation
-via an auth-injecting proxy. The background research lives in the ARC-1 repo at
-`docs/research/arc1-embedded-adt-ls-edition.md`.
+Roadmap (see `docs/plans/`): ✅ foundation → ✅ containerize → ✅ deploy to BTP CF
+→ ✅ headless connect (DIRECT) → **next:** CC-mode deploy (code ready, needs a
+running Cloud Connector + destination), `read_source` via LSP `readFile`, more
+curated tools, then per-user principal propagation. Background research lives in
+the ARC-1 repo at `docs/research/arc1-embedded-adt-ls-edition.md`.

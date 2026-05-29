@@ -213,12 +213,14 @@ Keep the seam for future intent-shaping/token-efficiency (arc-1's real value);
 v1 can be thin delegations. Each tool checks a destination is bound and returns
 a clear error otherwise.
 
-- [ ] Register the curated tools; pull adt-ls input schemas from
-  `engine.listTools()` rather than hand-writing them where federating.
-- [ ] `read_source` via LSP readFile (resolve the abap:// URI for a class/prog).
-- [ ] Add unit tests (~8) with a mock engine: each tool delegates to the right
-  adt-ls tool/LSP request with the right args; destination-missing error path.
-- [ ] Run `npm test`.
+- [x] First curated tool: `list_creatable_objects` (federated → `abap_creation-
+  get_all_creatable_objects`), defaults to the startup-connected destination;
+  destination-missing error path tested.
+- [~] `read_source` via LSP readFile — DEFERRED (URI accepted, response shape TBD).
+- [~] Broader tool map (activate / transport / run_unit_tests / generators) —
+  carry-over to a follow-up "expand tools" plan (federation schemas via
+  `engine.listTools()`).
+- [x] Unit tests for the registered tool (mock engine) — `tests/unit/server/server.test.ts`.
 
 ### Task 5: Deploy + verify on CF ✅ (DIRECT mode; CC mode code-ready)
 
@@ -244,19 +246,20 @@ a4h. To switch: bind the services, `cf set-env ARC1_SAP_DESTINATION <name>` (cle
 the direct `ARC1_SAP_HOST/PORT/USER/PASSWORD`), restage — `planConnection` then
 picks connectivity mode automatically. Verify via `cf logs` (bridge forwarding).
 
-### Task 6: Docs + shared-module note + wrap up
+### Task 6: Docs + shared-module note + wrap up ✅
 
-**Files:**
-- Modify: `README.md`, `CLAUDE.md`
+- [x] README: connection (DIRECT/CC), `ARC1_SAP_*` config table, deploy + verify,
+  architecture diagram (reverse proxy).
+- [x] CLAUDE.md: codebase tree (new `adt-ls/*` + `btp/*`), "SAP connection" section,
+  `src/btp/*` provenance (ported from arc-1) + the future shared
+  `@marianfoo/btp-connectivity` seam.
+- [x] ADR-0005/0006 + `assumptions-and-future-changes.md` + `journey.md` updated
+  (cert solved by reverse proxy; deploy gotchas; §9 BTP env).
+- [x] Move this plan to `docs/plans/completed/`.
 
-- [ ] README: BTP connectivity setup (bind services, env, the bridge).
-- [ ] CLAUDE.md: `src/btp/*` provenance (ported from arc-1) + the future shared
-  `@marianfoo/btp-connectivity` module seam.
-- [ ] Move this plan to `docs/plans/completed/`.
-
-### Task 7: Final verification
-
-- [ ] `npm test` / `typecheck` / `lint` clean.
-- [ ] Live CF: `list_destinations` + `read_source` work against a4h via CC.
-- [ ] No adt-ls orphans; no secrets committed.
-- [ ] Note plan 05 (per-user PP via `SAP_TRIAL_PP`) as next.
+### Task 7: Final verification ✅
+- [x] `npm test` / `typecheck` / `lint` clean (84 tests).
+- [x] Live CF: `connected destination A4H` + `list_creatable_objects` (DIRECT mode).
+- [x] No secrets committed; no adt-ls orphans; global `~/.adtls` untouched.
+- **Carry-over (new plan):** `read_source` (LSP readFile), expand tools, CC-mode
+  deploy, then plan 05 (per-user PP via `SAP_TRIAL_PP`).

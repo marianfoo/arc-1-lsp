@@ -42,20 +42,55 @@ so understand the **why** before changing anything:
 
 ```
 src/
-├── index.ts                 # entry (stdio; http-streamable in the deploy plan)
+├── index.ts                 # entry (stdio | http-streamable)
 ├── adt-ls/
 │   ├── discovery.ts         # locate adt-ls (env > vendor > installed ext; per-platform)
-│   ├── driver.ts            # spawn headless + LSP over named pipe (vscode-jsonrpc)
+│   ├── driver.ts            # spawn headless + LSP over named pipe; routeServerRequest (pluggable
+│   │                        #   server→client handlers) + extraEnv (JAVA_TOOL_OPTIONS truststore)
 │   ├── mcp-lifecycle.ts     # adtLs/mcp/{startMCPServer,stopMCPServer,setDestination}
-│   └── mcp-federation.ts    # Streamable-HTTP client to adt-ls's own /mcp
+│   ├── mcp-federation.ts    # Streamable-HTTP client to adt-ls's own /mcp
+│   ├── destinations.ts      # initializeService/create/ensureLoggedOn/getLogonInfo + headless
+│   │                        #   reentrance-ticket logon handler (ADR-0006)
+│   ├── tls-reverse-proxy.ts # TLS terminator: adt-ls → https://localhost → backend (direct | bridge)
+│   └── cert.ts              # build the JVM truststore from adt-ls's own JRE (keytool) + openssl cert
+├── btp/                     # ported from arc-1's src/adt/btp.ts (candidate shared @marianfoo/btp-connectivity)
+│   ├── vcap.ts              # parseVCAPServices → BTPConfig (null off-BTP)
+│   ├── token.ts             # OAuth2 client_credentials token
+│   ├── connectivity.ts      # createConnectivityProxy (cached connectivity JWT)
+│   ├── destination.ts       # lookupDestination (fixed-user; PP is plan 05)
+│   ├── bridge.ts            # local HTTP forward proxy → BTP Connectivity (standard proxy, NOT CONNECT)
+│   └── types.ts             # BTPConfig / Destination / BTPProxyConfig
 └── server/
-    ├── config.ts            # loadConfig (CLI > env > default)
+    ├── config.ts            # loadConfig (CLI > env > default); SapTargetConfig + sapDestination
     ├── logger.ts            # stderr-only logger
-    ├── engine.ts            # discover → spawn → startMCP → federate
-    └── server.ts            # McpServer + tool registration (health, list_destinations)
-tests/unit/…                 # vitest; adt-ls-dependent tests are skipIf-gated
+    ├── auth.ts              # API-key edge auth (Bearer | x-api-key)
+    ├── http.ts              # http-streamable transport + API-key gate + /healthz
+    ├── engine.ts            # discover→spawn→startMCP→federate; planConnection + connect (direct|CC)
+    └── server.ts            # McpServer + tools (health, list_destinations, list_creatable_objects)
+tests/unit/…                 # vitest; adt-ls/SAP-dependent tests are skipIf-gated
 docs/plans/…                 # ralphex plans (one per roadmap state)
 ```
+
+## SAP connection (headless, ADR-0005/0006)
+
+To reach a SAP backend, the engine (`planConnection` + `connect` in `engine.ts`):
+1. builds TLS material from adt-ls's **own JRE** (`cert.ts`: copy cacerts + add a
+   `CN=localhost` cert → truststore via `JAVA_TOOL_OPTIONS`),
+2. starts the **TLS reverse proxy** (`tls-reverse-proxy.ts`) — adt-ls connects to
+   `https://localhost:<port>` (trusted, hostname-matched) and it re-originates to
+   the backend: **DIRECT** (internet-reachable) or **CC** (→ `bridge.ts` → BTP
+   Connectivity → Cloud Connector),
+3. creates a `reentranceTicket` destination + **headless reentrance logon**
+   (`destinations.ts`): GET logonUrl with real creds → 307 ticket → fire-and-forget
+   deliver to adt-ls's `/adt/redirect` → return `true` immediately.
+
+`planConnection`: on BTP (connectivity bound) `ARC1_SAP_DESTINATION` → CC mode
+(resolve the BTP destination); else full `ARC1_SAP_*` → DIRECT; else none.
+Connection failure is **non-fatal** (server starts disconnected). Three load-bearing
+facts, all live-verified: `authenticationKind:reentranceTicket` (NOT basicAuth),
+`protocol:"http"` + HTTPS systemUrl, fire-and-forget delivery. Full recipe +
+dead-ends: `docs/adt-ls-headless-notes.md`. `openssl` (cert gen) + `keytool` (in
+adt-ls's JRE) are runtime deps — `openssl` is in the Dockerfile.
 
 ## Key facts about `adt-ls`
 

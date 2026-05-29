@@ -95,10 +95,26 @@ recipe is codified in `src/adt-ls/`; remaining = wiring + the read_source URI sh
 - adt-ls launch: `adt-ls -Djco.trace_path <d> -data <d> --pipe=<unix-socket>`
   (client listens, LS connects); requires `userAgentInfos`; requires HTTPS.
 
-## 6. Open / next
-Logon is PROVEN (§4b). Remaining: codify the recipe into modules with tests
-(driver pluggable server→client handler + truststore env; `src/adt-ls/
-destinations.ts`; the TLS reverse-proxy module; config; engine wiring; gated
-integration test), nail the `read_source` LSP `readFile` response shape, then the
-CF path (reverse proxy → connectivity bridge → Cloud Connector → a4h). a4h is the
-chosen target; H01 (valid cert, OAuth reentrance) is the BTP variant for later.
+## 6. Codified + connected on BTP CF (Step 4 reached)
+The §4b recipe became tested modules (`src/adt-ls/{tls-reverse-proxy,cert,
+destinations}.ts`, driver `routeServerRequest`+`extraEnv`, engine `planConnection`+
+`connect`, `config` `SapTargetConfig`), and arc-1-lsp now **connects to a4h from
+BTP CF**:
+- **DIRECT mode** (plan 04 Task 5): a4h is internet-reachable, so CF connects
+  straight to `a4h:50001` — no Cloud Connector needed for v1. Verified live: CF logs
+  show `connected destination A4H`, and the MCP endpoint returns the real a4h
+  object catalog via `list_creatable_objects`.
+- **CC mode** (Task 4): coded + unit-tested (reverse proxy `forwardProxy` →
+  `bridge.ts` → BTP Connectivity), **not yet deployed** (needs a running Cloud
+  Connector + bound services + a BTP destination).
+- Deploy lessons: `node:22-slim` lacks the `openssl` CLI (cert gen) → added to the
+  Dockerfile; the connection step is non-fatal so a logon failure doesn't crash the
+  server; `cf stop` before re-push when the org memory quota is tight.
+
+## 7. Open / next
+- **`read_source`** via LSP `adtLs/fileSystem/readFile` — the URI form
+  `adt://<dest>/sap/bc/adt/oo/classes/<n>/source/main` is accepted but returned `{}`
+  in the spike; nail the response shape (maybe needs stat/open first).
+- **CC-mode deploy** once a Cloud Connector + destination for a4h are confirmed up.
+- More curated arc-1-style tools; then per-user **principal propagation** (plan 05).
+- H01 (valid cert, OAuth reentrance) as the BTP-native target variant.
