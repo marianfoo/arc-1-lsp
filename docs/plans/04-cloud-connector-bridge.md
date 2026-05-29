@@ -177,6 +177,37 @@ BTP-bound, engine starts the bridge, sets the proxy for adt-ls, resolves
 - [ ] Unit-test the engine wiring with mocks (BTP-bound vs not).
 - [ ] Run `npm test`.
 
+### Task 4.5: arc-1-style intent tools via adt-ls
+
+**Files:**
+- Modify: `src/server/server.ts`, `src/server/engine.ts`
+- Create: `src/handlers/tools.ts`, `tests/unit/handlers/tools.test.ts`
+
+Expose a curated set of **arc-1-style intent tools** backed by adt-ls, so
+arc-1-lsp surfaces a familiar ABAP tool set (the "expand tools" phase). Two
+sources: (a) **federation** — delegate to adt-ls's MCP tools using their **real
+input schemas** (introspect via `engine.listTools()` — do NOT hand-guess
+schemas); (b) **LSP** — `read_source` via `adtLs/fileSystem/readFile` for the
+SAPRead-style flagship adt-ls has no MCP tool for.
+
+Map (arc-1 name → adt-ls backing):
+- `read_source` (SAPRead) → LSP `adtLs/fileSystem/readFile` (URI from name+type)
+- `activate` (SAPActivate) → `abap_activate_objects`
+- `run_unit_tests` (SAPDiagnose-tests) → `abap_run_unit_tests`
+- `transport` (SAPTransport) → `abap_transport-get` / `abap_transport-create`
+- `list_rap_generators` / `generate_objects` (SAPManage/RAP) → `abap_generators-*`
+
+Keep the seam for future intent-shaping/token-efficiency (arc-1's real value);
+v1 can be thin delegations. Each tool checks a destination is bound and returns
+a clear error otherwise.
+
+- [ ] Register the curated tools; pull adt-ls input schemas from
+  `engine.listTools()` rather than hand-writing them where federating.
+- [ ] `read_source` via LSP readFile (resolve the abap:// URI for a class/prog).
+- [ ] Add unit tests (~8) with a mock engine: each tool delegates to the right
+  adt-ls tool/LSP request with the right args; destination-missing error path.
+- [ ] Run `npm test`.
+
 ### Task 5: Bind services + deploy + verify on CF
 
 **Files:**
