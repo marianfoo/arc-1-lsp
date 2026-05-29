@@ -10,6 +10,20 @@ single-developer / desktop sibling to the main multi-user/BTP ARC-1. The main
 ARC-1 lives at `../arc-1`; deep background on the design and the `adt-ls`
 internals is in `../arc-1/docs/research/{arc1-embedded-adt-ls-edition,sapse-adt-vscode-mcp}.md`.
 
+## Read these first (decisions, assumptions, history)
+
+Much of this design is shaped by *current* adt-ls limitations that SAP may lift —
+so understand the **why** before changing anything:
+- **`docs/adr/`** — Architecture Decision Records (the decisions + "revisit when").
+  Start at `docs/adr/README.md`.
+- **`docs/assumptions-and-future-changes.md`** — the watch-list: auth, PP, BTP
+  setup, licensing, the private LSP protocol, TLS — what to re-verify against the
+  installed adt-ls version, and what would let us delete complexity.
+- **`docs/journey.md`** — the chronological story incl. dead-ends (don't re-walk them).
+- **`docs/adt-ls-headless-notes.md`** — the reverse-engineered headless connection
+  recipe (initialize/userAgentInfos, reentrance-ticket logon, HTTPS requirement).
+- **`docs/plans/`** — ralphex plans (completed + in-progress) per roadmap state.
+
 ## Design principles (non-negotiable)
 
 1. **Zero hand-rolled ADT.** Never port `src/adt/{http,crud,xml-parser,…}` from

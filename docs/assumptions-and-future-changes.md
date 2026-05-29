@@ -1,0 +1,81 @@
+# Assumptions & future changes — what to re-check
+
+arc-1-lsp's design is shaped by **current limitations of SAP's `adt-ls`** (which
+is young — its MCP server is flagged "experimental"). Several constraints below
+may be lifted by SAP, which would let us **delete complexity**. Future Claude:
+when picking this up, **re-verify the "current state" rows against the installed
+adt-ls version** — if SAP changed one, simplify accordingly.
+
+Installed reference at time of writing: `sapse.adt-vscode` **1.0.0**, adt-ls
+**1.0.0.202605281240**, ADT plugins **3.58.x**, on SAP Machine JRE 21.
+
+## 1. adt-ls authentication (the biggest lever)
+- **Current:** HTTP logon is **browser-based reentrance-ticket only** — adt-ls
+  ignores `basicAuth`, requires HTTPS, and drives an interactive SSO flow
+  (ADR-0006). We work around it with headless browser-emulation + an
+  auth-injecting proxy (ADR-0005).
+- **If SAP adds** a non-interactive auth (basic/token/client-credentials) or a
+  documented "headless logon" → **drop the browser-emulation and most of the
+  proxy**; adt-ls could authenticate directly. **Re-check every adt-ls release.**
+- **Where it lives:** `src/adt-ls/driver.ts` (the `requestBrowserBasedLogon`
+  handler, once implemented), `docs/adt-ls-headless-notes.md`.
+
+## 2. Principal propagation (per-user identity)
+- **Current:** adt-ls is single-session; no hook to inject a per-user token. PP is
+  achieved by arc-1-lsp doing the BTP Destination-Service jwt-bearer exchange and
+  injecting the per-user token at the proxy (ADR-0005), with one adt-ls session
+  per concurrent user (a pool).
+- **If SAP adds** native BTP Destination/PP support to adt-ls, or a way to set a
+  per-request identity → PP simplifies dramatically (no pool, no proxy injection).
+- **Reference:** main ARC-1's `src/adt/btp.ts` `lookupDestinationWithUserToken`
+  (SAP Cloud SDK + jwt-bearer fallback); our `src/btp/*` ports the fixed-user half.
+
+## 3. BTP Connectivity / Cloud Connector
+- **Current:** adt-ls doesn't speak BTP Connectivity; we run a local forward proxy
+  (`src/btp/bridge.ts`) that adds the connectivity token + `SAP-Connectivity-SCC-
+  Location_ID` using **standard HTTP-proxy protocol (NOT CONNECT)** — the
+  hard-won lesson from ARC-1's `doProxyRequest`.
+- **If SAP adds** native connectivity support to adt-ls → no bridge needed.
+- **Setup that can change:** the bound services (`connectivity`, `destination`),
+  the destination names (`SAP_TRIAL` basic/CC, `SAP_TRIAL_PP` principal-propagation),
+  the CC virtual host mapping. These are admin-configured in the BTP subaccount and
+  may be renamed/re-pointed — don't hard-code; read from VCAP_SERVICES + config.
+
+## 4. adt-ls distribution & licensing (ADR-0002)
+- **Current:** BYO — non-redistributable SAP Developer License; we inject the
+  binary from the installed VSIX at build time.
+- **If SAP** ships adt-ls standalone or allows redistribution → bundle it, drop
+  the discovery/extract dance and the CI skip-gating.
+
+## 5. adt-ls's own MCP server
+- **Current:** adt-ls embeds SAP's MCP server (14 tools, `experimental`,
+  disabled-by-default). We start it over LSP (`adtLs/mcp/startMCPServer`) and
+  federate it. SAP may enable it by default, add tools, or change the tool set
+  per backend ("IDE Actions").
+- **If SAP** matures/ships this → we federate more directly; fewer custom tools
+  needed. Watch the tool list per release (`docs` in main arc-1:
+  `docs/research/sapse-adt-vscode-mcp.md` has the teardown).
+
+## 6. The private LSP protocol (`adt-ls-client-protocol`)
+- **Current:** **unpublished** (npm 404). We reverse-engineered the requests we
+  need: `initialize{initializationOptions.userAgentInfos}`, `destinations/
+  {initializeService,create,ensureLoggedOn,getLogonInfo,requestBrowserBasedLogon}`,
+  `mcp/{startMCPServer,stopMCPServer,setDestination}`, `fileSystem/{readFile,…}`.
+- **Risk:** SAP can change these between releases. **Pin behavior to the installed
+  `sapse.adt-vscode` version**; detect + warn on mismatch.
+- **If SAP publishes** the protocol/types → adopt them, drop reverse-engineering.
+
+## 7. TLS / certificates
+- **Current:** adt-ls requires HTTPS; a4h:50001 uses a **self-signed** cert →
+  adt-ls's JRE must trust it (truststore via `-Djavax.net.ssl.trustStore`).
+- **Smoother path:** BTP ABAP systems (e.g. `H01`) have **valid CA certs** → no
+  trust setup; but their reentrance needs OAuth, not basic auth (trade-off).
+
+## 8. Target systems (test/validation)
+- **a4h** = on-prem S/4HANA 2023 trial, `https://a4h.marianzeis.de:50001`, user
+  `DEVELOPER`, client 001, self-signed cert, internet-reachable (also via CC from
+  BTP). Easiest for reentrance emulation (basic auth → ticket works).
+- **H01** = the user's BTP ABAP system, `https://<guid>.abap.us10.hana.ondemand.com`,
+  reentranceticket, valid cert — the "native" adt-ls target, but OAuth-based.
+- Credentials are **never committed**; passed via env / `cf set-env`. (The
+  `DEVELOPER` password appeared in chat during research — rotate it.)
