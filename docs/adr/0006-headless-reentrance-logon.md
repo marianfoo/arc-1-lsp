@@ -1,7 +1,8 @@
 # ADR-0006: Headless logon by emulating the reentrance-ticket browser flow
 
 ## Status
-Accepted (2026-05-29) — based on live reverse-engineering; see `docs/adt-ls-headless-notes.md`
+Accepted (2026-05-29) — **PROVEN end-to-end against a4h (`logonState:"connected"` +
+real backend data)**; full recipe in `docs/adt-ls-headless-notes.md` ("FULLY PROVEN").
 
 ## Context
 To use adt-ls headlessly we must get it from "destination created" to "logged on"
@@ -16,27 +17,39 @@ HTTP logon behavior (this is the crux of the whole project):
 
 ## Decision
 **Emulate the browser headlessly.** When adt-ls sends the server→client request
-`adtLs/destinations/requestBrowserBasedLogon` (carrying the `logonUrl =
+`adtLs/destinations/requestBrowserBasedLogon` (carrying `logonUrl =
 …/sap/bc/adt/core/http/reentranceticket?redirect-url=http://localhost:<adtls>/adt/redirect`):
 1. `GET logonUrl` with the real credentials (`Authorization: Basic <user>` for a4h;
    OAuth bearer for BTP) → SAP returns **307** with `location:
    http://localhost:<adtls>/adt/redirect?...&reentrance-ticket=<TICKET>`.
-2. `GET` that `location` (use `127.0.0.1`) → delivers the ticket to adt-ls's local
-   listener (returns 302) → adt-ls captures it and completes logon.
-3. Return `true` to the request.
+2. **Fire-and-forget** `GET location` (rewrite `localhost`→`127.0.0.1`) → delivers
+   the ticket to adt-ls's local listener (returns 302) → adt-ls captures it.
+3. **Return `true` immediately** — do NOT await step 2. adt-ls's `/adt/redirect`
+   listener won't respond until this request resolves `true` ("browser opened"),
+   so awaiting the delivery **deadlocks** (proven via `lsof`).
 
-`systemUrl` is HTTPS. Self-signed certs (a4h:50001) require the JRE to trust them
-(truststore via `-Djavax.net.ssl.trustStore`, or a valid-cert BTP system avoids it).
+Two create-payload requirements make this work (both proven):
+- **`authenticationKind: "reentranceTicket"`** (NOT `basicAuth`) — basicAuth gets a
+  ticket but session dispatch then needs a password it never persisted
+  (`IllegalStateException: password must not be null`). The Basic creds are applied
+  by OUR handler in step 1, not stored on the destination.
+- **`protocol: "http"`** with **HTTPS** `systemUrl` (scheme lives in the URL).
+
+The self-signed-cert problem is solved by the **ADR-0005 local reverse proxy**, not
+a truststore-only hack: a JRE truststore fixes *trust* but not *hostname*
+(`*.dummy.nodomain` ≠ real host; adt-ls's Apache client ignores
+`-Djdk.internal.httpclient.disableHostnameVerification`). So `systemUrl` points at
+`https://localhost:<proxy>` with a `CN=localhost` cert in the truststore.
 
 ## Consequences
-- Headless logon works without a browser — proven through ticket issuance +
-  delivery (listener `resp 302`).
-- arc-1-lsp's logon handler becomes the place real credentials are applied → ties
-  directly into ADR-0005 (the proxy can serve the reentrance endpoint locally and
-  do the real auth).
+- Headless logon works without a browser — **proven to `logonState:"connected"`
+  with real backend data returned** (not just ticket issuance).
+- arc-1-lsp's logon handler is where real credentials are applied → ties directly
+  into ADR-0005 (the reverse proxy also terminates TLS for the localhost cert).
 - Coupled to SAP's reentrance-ticket URL shape + adt-ls's request contract
   (private; pin to the installed version).
-- Self-signed certs need explicit trust; valid-cert (BTP) systems are smoother.
+- The reverse proxy is the single component solving cert trust+hostname AND (on
+  CF) the Cloud-Connector hop — one mechanism, reused.
 
 ## Revisit when
 - adt-ls adds a **headless / basic / token logon mode** (no browser) → drop the

@@ -36,61 +36,104 @@ a4h (`http://a4h.marianzeis.de:50000`). All verified 2026-05-29.
   the destinations plugin: `basicAuth`, `reentranceTicket`, `oauth`, `sso`.
 - `ensureLoggedOn` / `getLogonInfo` take the destination **id string**.
 
-## OPEN blocker — headless basic-auth logon
+## ✅ FULLY PROVEN end-to-end against a4h (2026-05-29)
 
-`ensureLoggedOn('A4H')` returns
-`{ logonState: "disconnected", message: "Internal error occurred, check the logs." }`
-even though:
-- a4h is reachable from here (`curl …/sap/bc/adt/discovery` → 401), and
-- `DEVELOPER` basic auth is valid (`curl -u DEVELOPER:… …/discovery` → **200**).
+Headless logon → `logonState: "connected"` → real backend data. Proven via a
+throwaway spike (now deleted; recipe codified in `src/adt-ls/`). The complete,
+working recipe — every value below is live-verified:
 
-So it is **not** network or credentials — adt-ls's *headless basic-auth logon
-path* throws an internal error (a separate headless quirk from the create
-blocker above). No `requestLogonInput` is sent.
+### 1. systemUrl must be HTTPS, and the cert problem is solved by a reverse proxy
+- `HttpDestinationRegistry` rejects `http://` (*"Only HTTPS protocol is allowed"*).
+- a4h:50001 presents SAP's default self-signed cert `CN=*.dummy.nodomain`. A JRE
+  truststore fixes **trust** but NOT **hostname** — adt-ls's HTTP client (Apache,
+  not JDK `HttpClient`, so `-Djdk.internal.httpclient.disableHostnameVerification`
+  does NOT help) then throws `SSLPeerUnverifiedException: Certificate for
+  <a4h.marianzeis.de> doesn't match common name of the certificate subject`.
+- **Solution (ADR-0005): a local TLS-terminating reverse proxy.** adt-ls's
+  `systemUrl = https://localhost:<proxyPort>`; the proxy presents a cert with
+  `CN=localhost` (which we add to the JRE truststore → trust ✓ + hostname ✓) and
+  re-originates to a4h:50001 with `rejectUnauthorized:false` (our Node code; we
+  don't care about a4h's cert as the client). This is **the same component the CF
+  bridge needs** — not a throwaway workaround. Forward `req.headers` as-is so SAP
+  builds the reentrance `logonUrl` against `localhost:<proxyPort>`.
 
-## RESOLVED — the "basic-auth" framing above was wrong. Full logon recipe:
+### 2. JRE truststore — copy cacerts, add the localhost (proxy) cert
+Build from the bundled JRE's own cacerts (so all public CAs still work, needed
+for BTP later), add the proxy's localhost cert, inject via env (launcher-agnostic,
+no `-vmargs` parsing risk):
+```
+cp <jre>/lib/security/cacerts truststore.p12          # storepass changeit, PKCS12
+<jre>/bin/keytool -importcert -keystore truststore.p12 -storepass changeit \
+   -noprompt -alias arc1-proxy-localhost -file proxy-cert.pem
+# spawn adt-ls with:
+JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=<p12> -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12"
+```
+(`keytool`/`java` live in `…/com.sap.adt.jvm.sapmachineminimal.*/jre/bin/`.)
 
-Root-caused via the Eclipse `.metadata/.log` (the stack is NOT in stdout/LSP
-response; it's in `<data-dir>/.metadata/.log` and in `window/logMessage`):
+### 3. create — `protocol:"http"`, `authenticationKind:"reentranceTicket"`
+```json
+{ "id": "A4H", "protocol": "http",
+  "properties": { "systemUrl": "https://localhost:<proxyPort>",
+                  "authenticationKind": "reentranceTicket",
+                  "user": "DEVELOPER", "client": "001", "language": "EN" } }
+```
+- `protocol:"http"` = ADT-over-HTTP (vs RFC); the **URL scheme lives in
+  systemUrl**. `protocol:"https"` → `Protocol.ordinal() because "protocol" is null`.
+- **`authenticationKind` MUST be `"reentranceTicket"`, NOT `"basicAuth"`.** With
+  `basicAuth`, logon does the reentrance dance to get a ticket but then session
+  dispatch picks `HttpBasicAuthHandler` → `IllegalStateException: The password
+  must not be null or empty` (adt-ls does NOT persist the create-time password).
+  `reentranceTicket` makes the session use the delivered ticket → connected.
+- `create` returns the destination id string on success (e.g. `"A4H"`).
 
-1. **adt-ls ignores `authenticationKind: basicAuth` for HTTP** — it ALWAYS does
-   the **browser-based reentrance-ticket** flow. (basicAuth just produced a
-   confusing NPE because the logon orchestration is reentrance-only.)
-2. **`systemUrl` MUST be HTTPS** — `HttpDestinationRegistry.register` throws
-   `IllegalArgumentException: Illegal System URL … Only HTTPS protocol is
-   allowed` for `http://`. So a4h must be `https://a4h.marianzeis.de:50001`
-   (HTTP 50000 is rejected).
-3. **Headless browser-emulation of the reentrance ticket WORKS** — when adt-ls
-   sends the server→client request `adtLs/destinations/requestBrowserBasedLogon`
-   (params[0].field.value = the `logonUrl` =
-   `https://…/sap/bc/adt/core/http/reentranceticket?redirect-url=http://localhost:<adtls>/adt/redirect`):
-   - GET `logonUrl` with `Authorization: Basic <DEVELOPER>` (TLS-skip for a4h's
-     self-signed cert) → **307** with `location:
-     http://localhost:<adtls>/adt/redirect?...&reentrance-ticket=<TICKET>`.
-   - GET that `location` (use `127.0.0.1`, not `localhost`) → hits adt-ls's
-     listener (returns 302) → adt-ls captures the ticket.
-   - Return `true` to the request.
-   (Verified: ticket issued + delivered, listener `resp 302`.)
-4. **Destinations persist GLOBALLY in `~/.adtls/destinations.json`** (shared with
-   the user's real VS Code/Cursor/Eclipse!). For tests, pass an **isolated**
-   `destinationsStorePath` to `initializeService` — do NOT use `''` (global) or
-   you pollute the user's store and stale entries get reused. (Cleaned up a
-   polluting `A4H` entry; backup at `~/.adtls/destinations.json.bak-arc1`.)
+### 4. ensureLoggedOn → requestBrowserBasedLogon → headless reentrance emulation
+`ensureLoggedOn('A4H')` (param = bare id string) makes adt-ls send the
+server→client request `adtLs/destinations/requestBrowserBasedLogon` with:
+```json
+{ "id":"A4H","title":"Logon to A4H",
+  "params":[{"field":{"key":"logonUrl","value":"https://localhost:<proxy>/sap/bc/adt/core/http/reentranceticket?redirect-url=http%3A%2F%2Flocalhost%3A<adtls>%2Fadt%2Fredirect&_=…"}}]}
+```
+Handler:
+1. `GET logonUrl` with `Authorization: Basic <user:pass>` → **307**, `location:
+   http://localhost:<adtls>/adt/redirect?...&reentrance-ticket=<TICKET>`.
+2. **Fire-and-forget** `GET location` (rewrite `localhost`→`127.0.0.1`) → adt-ls
+   listener returns **302**. ⚠ **Do NOT `await` this before returning** — adt-ls's
+   `/adt/redirect` listener won't respond until the `requestBrowserBasedLogon`
+   request resolves `true` (browser-flow semantics: `true` = "browser opened").
+   Awaiting the delivery deadlocks (proven via `lsof`: ESTABLISHED, no response).
+3. **Return `true` immediately.**
 
-### The one remaining external dependency: a4h's self-signed cert
-a4h:50001 is HTTPS with a **self-signed certificate**. adt-ls's JRE will reject
-it unless told to trust it. Options for the engine/container:
-- Import a4h's cert into a truststore + pass `-Djavax.net.ssl.trustStore=… 
-  -Djavax.net.ssl.trustStorePassword=…` to adt-ls (via adt-ls.ini `-vmargs` or
-  launch args), or check for an adt-ls "trust untrusted cert" server→client
-  request to answer.
-- **Or target a BTP ABAP system** (e.g. the user's `H01`,
-  `https://<guid>.abap.<region>.hana.ondemand.com`, **valid CA cert**) — no cert
-  problem; but its reentrance ticket needs an OAuth/IAS session (not basic auth),
-  so the browser-emulation would do the OAuth dance instead of basic auth.
+adt-ls then emits `adtLs/destinations/logonStateChanged` → `pending` → `connected`,
+and `ensureLoggedOn` resolves `{ logonState: "connected" }`.
 
-### Implementation note
-This whole recipe belongs in the engine's logon module (`src/adt-ls/` + the
-`requestBrowserBasedLogon` handler in the driver), built with care + tests — not
-more shell spikes. The same flow is needed on CF (behind the connectivity
-bridge), where systemUrl points at the bridge over HTTPS.
+### 5. Other server→client requests during logon (must answer correctly)
+- `workspace/configuration {items:[…]}` → return `items.map(()=>null)` (use
+  defaults; one was `adt.joule.url`). A bare `null` is wrong (it wants an array).
+- `client/registerCapability`, `window/workDoneProgress/create` → `null` is fine.
+
+### 6. Destinations persist GLOBALLY in `~/.adtls/destinations.json`
+Shared with the user's real VS Code/Cursor/Eclipse! Always pass an **isolated**
+`destinationsStorePath` to `initializeService` (NOT `''` = global) so tests/runs
+never pollute the user's store or reuse stale entries.
+
+### 7. Backend calls + read_source
+- Federated MCP backend calls work once connected, e.g.
+  `abap_creation-get_all_creatable_objects {destination:"A4H"}` returned real
+  rows (`{"creatableObjects":[{"name":"ABAP Class","objectType":"CLAS/OC"},…]}`).
+- **adt-ls's MCP has NO read-source/search tool** (the 14 tools are creation /
+  activation / unit-tests / transport / generators / business-services). So
+  `read_source` (SAPRead) MUST use LSP `adtLs/fileSystem/readFile`. The URI form
+  `adt://<DEST>/sap/bc/adt/oo/classes/<name>/source/main` is accepted; the exact
+  response shape still needs nailing during implementation (a bare `{}` came back
+  — likely needs a stat/open first or a different result field).
+
+### MCP start quirk
+`adtLs/mcp/startMCPServer` rejects `port:0` (*"Port must be between 1024 and
+65535"*) — pass an explicit fixed port.
+
+### Remaining for CF (not local)
+Local a4h is fully solved. On CF the **same reverse proxy** terminates TLS for
+adt-ls; its backend side forwards through the **BTP connectivity forward-proxy**
+(`src/btp/bridge.ts`) → Cloud Connector → a4h, instead of connecting to a4h
+directly. BTP ABAP systems (valid CA cert) need no localhost-proxy cert trick but
+use OAuth (not Basic) when fetching the reentrance ticket.

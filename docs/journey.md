@@ -62,12 +62,29 @@ whole lesson:
    (backup `~/.adtls/destinations.json.bak-arc1`).
 8. **Breakthrough:** emulate the browser headlessly — `GET` the reentrance
    `logonUrl` with `Authorization: Basic` → 307 + reentrance-ticket → deliver to
-   adt-ls's `127.0.0.1/adt/redirect` listener (got `resp 302`). Ticket issued +
-   delivered. The only remaining external dep is a4h's **self-signed cert**.
+   adt-ls's `127.0.0.1/adt/redirect` listener. Ticket issued + delivered.
 
-**Net:** the full headless connection protocol is reverse-engineered (ADR-0006 +
-`adt-ls-headless-notes.md`). Remaining = *implementation* (the logon module in
-the engine) + cert trust — not research.
+## 4b. The logon, finished — PROVEN connected (one more spike)
+A final spike closed the last three gaps and reached `logonState:"connected"` +
+real backend data (`get_all_creatable_objects` returned CLAS/OC, BDEF/BDO, …):
+1. **Cert: hostname, not just trust.** A JRE truststore (copy cacerts + add a4h's
+   cert) fixed *trust* but adt-ls then threw `SSLPeerUnverifiedException` — the
+   cert is `*.dummy.nodomain`, not the real host, and adt-ls's **Apache** client
+   ignores `-Djdk.internal.httpclient.disableHostnameVerification` (that's only for
+   the JDK client). **Fix = the ADR-0005 reverse proxy:** adt-ls →
+   `https://localhost:<proxy>` (cert `CN=localhost`, trusted) → re-originate to
+   a4h with verification off. Same component CF needs.
+2. **`authenticationKind` dead-end (again):** with `basicAuth`, logon got the
+   ticket but session dispatch picked `HttpBasicAuthHandler` →
+   `IllegalStateException: password must not be null` (create-time pwd not
+   persisted). **Fix = `reentranceTicket`.**
+3. **Delivery deadlock:** `await`ing the `/adt/redirect` delivery before returning
+   `true` hangs forever (`lsof`: ESTABLISHED, no response) — the listener waits for
+   the request to resolve. **Fix = fire-and-forget delivery, return `true` now.**
+
+**Net:** headless connection is fully PROVEN, not just reverse-engineered. The
+recipe is codified in `src/adt-ls/`; remaining = wiring + the read_source URI shape
++ the CF backend hop (proxy → connectivity → CC).
 
 ## 5. Verified facts worth not re-discovering
 - adt-ls reachable headless; MCP startable over LSP; 14 federated tools.
@@ -79,7 +96,9 @@ the engine) + cert trust — not research.
   (client listens, LS connects); requires `userAgentInfos`; requires HTTPS.
 
 ## 6. Open / next
-Implement the reentrance browser-emulation logon in the engine/driver (with tests
-+ isolated store), solve the self-signed cert (truststore in the image), then the
-local "connected + read" proof, then CF behind the bridge. Decide target: a4h
-(basic + cert-trust) vs a BTP ABAP system (valid cert + OAuth reentrance).
+Logon is PROVEN (§4b). Remaining: codify the recipe into modules with tests
+(driver pluggable server→client handler + truststore env; `src/adt-ls/
+destinations.ts`; the TLS reverse-proxy module; config; engine wiring; gated
+integration test), nail the `read_source` LSP `readFile` response shape, then the
+CF path (reverse proxy → connectivity bridge → Cloud Connector → a4h). a4h is the
+chosen target; H01 (valid cert, OAuth reentrance) is the BTP variant for later.
