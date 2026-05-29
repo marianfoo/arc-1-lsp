@@ -5,6 +5,7 @@
  * `list_destinations`.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
 import type { Engine } from './engine.js';
 
 function text(value: unknown) {
@@ -33,6 +34,29 @@ export function createMcpServer(engine: Engine): McpServer {
       inputSchema: {},
     },
     async () => text(await engine.callTool('abap_list_destinations', {})),
+  );
+
+  server.registerTool(
+    'list_creatable_objects',
+    {
+      description:
+        'List the ABAP object types creatable on a connected system (federated from adt-ls). Uses the startup-connected destination when `destination` is omitted. Exercises a real backend call.',
+      inputSchema: {
+        destination: z
+          .string()
+          .optional()
+          .describe('Destination id; defaults to the destination connected at startup.'),
+      },
+    },
+    async ({ destination }) => {
+      const dest = destination ?? engine.connectedDestination;
+      if (!dest) {
+        return text(
+          'No ABAP destination is connected. Configure ARC1_SAP_HOST/PORT/USER/PASSWORD, or pass `destination`.',
+        );
+      }
+      return text(await engine.callTool('abap_creation-get_all_creatable_objects', { destination: dest }));
+    },
   );
 
   return server;

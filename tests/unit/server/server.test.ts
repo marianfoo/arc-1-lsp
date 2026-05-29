@@ -27,7 +27,7 @@ describe('createMcpServer', () => {
   it('registers exactly the foundation tools', async () => {
     const client = await linkedClient(fakeEngine());
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(['health', 'list_destinations']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['health', 'list_creatable_objects', 'list_destinations']);
   });
 
   it('health returns the engine health (adt-ls version + port)', async () => {
@@ -50,5 +50,27 @@ describe('createMcpServer', () => {
     const res = await client.callTool({ name: 'list_destinations', arguments: {} });
     expect(calledWith).toBe('abap_list_destinations');
     expect(JSON.stringify(res.content)).toContain('A4H_001');
+  });
+
+  it('list_creatable_objects defaults to the startup-connected destination', async () => {
+    let calledWith: { name?: string; args?: Record<string, unknown> } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        callTool: async (name: string, args?: Record<string, unknown>) => {
+          calledWith = { name, args };
+          return { content: [{ type: 'text', text: '{"creatableObjects":[]}' }] };
+        },
+      }),
+    );
+    await client.callTool({ name: 'list_creatable_objects', arguments: {} });
+    expect(calledWith.name).toBe('abap_creation-get_all_creatable_objects');
+    expect(calledWith.args).toEqual({ destination: 'A4H' });
+  });
+
+  it('list_creatable_objects errors clearly when no destination is connected', async () => {
+    const client = await linkedClient(fakeEngine()); // no connectedDestination
+    const res = await client.callTool({ name: 'list_creatable_objects', arguments: {} });
+    expect(JSON.stringify(res.content)).toContain('No ABAP destination is connected');
   });
 });

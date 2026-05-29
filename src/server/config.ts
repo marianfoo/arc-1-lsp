@@ -4,6 +4,26 @@
  */
 export type Transport = 'stdio' | 'http-streamable';
 
+/**
+ * A SAP backend to auto-connect on startup (fixed-user / Phase A). When set, the
+ * engine builds TLS material, starts the reverse proxy, and logs on headlessly
+ * (ADR-0006). Omitted ⇒ foundation mode (health/list_destinations only).
+ */
+export interface SapTargetConfig {
+  /** adt-ls destination id (what tool callers pass as `destination`). */
+  destinationId: string;
+  /** Real backend host the reverse proxy forwards to. */
+  host: string;
+  /** Real backend HTTPS port. */
+  port: number;
+  user: string;
+  password: string;
+  client: string;
+  language: string;
+  /** Accept the backend's (self-signed) cert. Default true — backend TLS is ours. */
+  insecure: boolean;
+}
+
 export interface Arc1LspConfig {
   /** Explicit adt-ls binary path; otherwise discovered. */
   adtLsPath?: string;
@@ -17,6 +37,32 @@ export interface Arc1LspConfig {
   httpPort: number;
   /** API keys for the HTTP edge (comma-separated `key` or `key:label`); empty = auth disabled. */
   apiKeys?: string;
+  /** Optional SAP backend to auto-connect on startup. */
+  sapTarget?: SapTargetConfig;
+}
+
+function bool(v: string | undefined, dflt: boolean): boolean {
+  if (v === undefined) return dflt;
+  return v === 'true' || v === '1' || v === 'yes';
+}
+
+/** Build the SAP target from flags/env, or undefined if host/port/creds missing. */
+function loadSapTarget(argv: string[], env: NodeJS.ProcessEnv): SapTargetConfig | undefined {
+  const host = flag(argv, 'sap-host') ?? env.ARC1_SAP_HOST;
+  const port = flag(argv, 'sap-port') ?? env.ARC1_SAP_PORT;
+  const user = flag(argv, 'sap-user') ?? env.ARC1_SAP_USER;
+  const password = flag(argv, 'sap-password') ?? env.ARC1_SAP_PASSWORD;
+  if (!host || !port || !user || !password) return undefined;
+  return {
+    destinationId: flag(argv, 'sap-destination') ?? env.ARC1_SAP_DESTINATION ?? 'SAP',
+    host,
+    port: Number(port),
+    user,
+    password,
+    client: flag(argv, 'sap-client') ?? env.ARC1_SAP_CLIENT ?? '001',
+    language: flag(argv, 'sap-language') ?? env.ARC1_SAP_LANGUAGE ?? 'EN',
+    insecure: bool(flag(argv, 'sap-insecure') ?? env.ARC1_SAP_INSECURE, true),
+  };
 }
 
 function flag(argv: string[], name: string): string | undefined {
@@ -42,5 +88,6 @@ export function loadConfig(
     transport,
     httpPort: httpPort ? Number(httpPort) : 8080,
     apiKeys: flag(argv, 'api-keys') ?? env.ARC1_API_KEYS,
+    sapTarget: loadSapTarget(argv, env),
   };
 }

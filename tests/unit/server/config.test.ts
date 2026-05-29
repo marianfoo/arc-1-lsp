@@ -40,3 +40,49 @@ describe('loadConfig (precedence: CLI > env > default)', () => {
     expect(() => loadConfig([], { ARC1_TRANSPORT: 'ftp' })).toThrow(/Invalid transport/);
   });
 });
+
+describe('loadConfig — sapTarget', () => {
+  const full = {
+    ARC1_SAP_HOST: 'a4h.example.com',
+    ARC1_SAP_PORT: '50001',
+    ARC1_SAP_USER: 'DEVELOPER',
+    ARC1_SAP_PASSWORD: 'secret',
+  };
+
+  it('is undefined when host/port/user/password are not all set', () => {
+    expect(loadConfig([], {}).sapTarget).toBeUndefined();
+    expect(loadConfig([], { ARC1_SAP_HOST: 'h', ARC1_SAP_PORT: '1' }).sapTarget).toBeUndefined();
+    const { ARC1_SAP_PASSWORD, ...noPwd } = full;
+    expect(loadConfig([], noPwd).sapTarget).toBeUndefined();
+  });
+
+  it('builds a target with defaults (destination SAP, client 001, EN, insecure true)', () => {
+    const t = loadConfig([], full).sapTarget;
+    expect(t).toEqual({
+      destinationId: 'SAP',
+      host: 'a4h.example.com',
+      port: 50001,
+      user: 'DEVELOPER',
+      password: 'secret',
+      client: '001',
+      language: 'EN',
+      insecure: true,
+    });
+  });
+
+  it('honors overrides + insecure=false', () => {
+    const t = loadConfig([], {
+      ...full,
+      ARC1_SAP_DESTINATION: 'A4H',
+      ARC1_SAP_CLIENT: '100',
+      ARC1_SAP_LANGUAGE: 'DE',
+      ARC1_SAP_INSECURE: 'false',
+    }).sapTarget;
+    expect(t).toMatchObject({ destinationId: 'A4H', client: '100', language: 'DE', insecure: false });
+  });
+
+  it('CLI flags override env', () => {
+    const t = loadConfig(['--sap-host', 'cli.host', '--sap-port', '443'], full).sapTarget;
+    expect(t).toMatchObject({ host: 'cli.host', port: 443 });
+  });
+});

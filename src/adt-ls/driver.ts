@@ -26,6 +26,32 @@ export interface AdtLsInitializeResult {
   capabilities: Record<string, unknown>;
 }
 
+/** Handler for a server→client LSP request (e.g. requestBrowserBasedLogon). */
+export type ServerRequestHandler = (params: unknown) => unknown | Promise<unknown>;
+
+/**
+ * Route a server→client request to a registered handler, with safe defaults.
+ * Pure (no I/O) so it can be unit-tested directly.
+ * - registered handler wins (e.g. `adtLs/destinations/requestBrowserBasedLogon`)
+ * - `workspace/configuration` MUST return an array of nulls, one per item
+ *   ("use defaults") — a bare null errors adt-ls's destination init.
+ * - everything else (client/registerCapability, window/workDoneProgress/create…)
+ *   → null is accepted.
+ */
+export function routeServerRequest(
+  method: string,
+  params: unknown,
+  handlers: Record<string, ServerRequestHandler>,
+): unknown | Promise<unknown> {
+  const handler = handlers[method];
+  if (handler) return handler(params);
+  if (method === 'workspace/configuration') {
+    const items = (params as { items?: unknown[] } | undefined)?.items ?? [];
+    return items.map(() => null);
+  }
+  return null;
+}
+
 function timeoutReject(ms: number): Promise<never> {
   return new Promise((_, reject) => {
     const t = setTimeout(() => reject(new Error(`adt-ls start timed out after ${ms}ms`)), ms);
@@ -39,18 +65,33 @@ export class AdtLsDriver {
   private conn?: MessageConnection;
   private readonly dataDir: string;
   private readonly pipePath: string;
+  private readonly extraEnv: Record<string, string>;
+  private readonly requestHandlers: Record<string, ServerRequestHandler>;
   initializeResult?: AdtLsInitializeResult;
 
   constructor(
     private readonly binPath: string,
-    opts: { dataDir?: string } = {},
+    opts: {
+      dataDir?: string;
+      /** Extra env for the spawned JVM (e.g. JAVA_TOOL_OPTIONS truststore). */
+      extraEnv?: Record<string, string>;
+      /** server→client request handlers, keyed by LSP method. */
+      requestHandlers?: Record<string, ServerRequestHandler>;
+    } = {},
   ) {
     const id = crypto.randomBytes(6).toString('hex');
     this.dataDir = opts.dataDir ?? path.join(os.tmpdir(), `arc1lsp-${id}`);
+    this.extraEnv = opts.extraEnv ?? {};
+    this.requestHandlers = { ...opts.requestHandlers };
     this.pipePath =
       process.platform === 'win32'
         ? path.join('\\\\.\\pipe\\', `arc1lsp-${id}`)
         : path.join(os.tmpdir(), `arc1lsp-${id}.sock`);
+  }
+
+  /** Register/replace a server→client request handler (before or after start). */
+  setRequestHandler(method: string, handler: ServerRequestHandler): void {
+    this.requestHandlers[method] = handler;
   }
 
   async start(timeoutMs = 60000): Promise<AdtLsInitializeResult> {
@@ -76,6 +117,7 @@ export class AdtLsDriver {
       ['-Djco.trace_path', this.dataDir, '-data', this.dataDir, `--pipe=${this.pipePath}`],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ...this.extraEnv },
       },
     );
     this.child.stdout?.on('data', capture);
@@ -91,8 +133,9 @@ export class AdtLsDriver {
 
     const socket = (await Promise.race([connected, exited, timeoutReject(timeoutMs)])) as net.Socket;
     this.conn = createMessageConnection(new StreamMessageReader(socket), new StreamMessageWriter(socket));
-    // Acknowledge any server->client request so it never blocks the handshake.
-    this.conn.onRequest((_method: string) => null);
+    // Route every server->client request through the registered handlers (with
+    // safe defaults) so the handshake + logon never block. See routeServerRequest.
+    this.conn.onRequest((method: string, params: unknown) => routeServerRequest(method, params, this.requestHandlers));
     this.conn.listen();
 
     const result = (await this.conn.sendRequest('initialize', {

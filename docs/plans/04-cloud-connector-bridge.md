@@ -149,11 +149,23 @@ federated adt-ls tools). **Gated integration test**: against direct
 `http://a4h.marianzeis.de:50000` with `DEVELOPER`, create a destination, log on,
 and read a known class — proving the destination/logon/read flow with no CC.
 
-- [ ] LSP wrappers + unit tests (fake driver asserts method + payload).
-- [ ] `read_source` tool registered.
-- [ ] Gated local integration test (skips without `ARC1_TEST_SAP_URL`/creds):
-  create → logon → read returns ABAP source.
-- [ ] Run `npm test`.
+- [x] LSP wrappers + unit tests (fake driver asserts method + payload) —
+  `src/adt-ls/destinations.ts`, `tests/unit/adt-ls/destinations.test.ts`.
+- [x] **Headless logon PROVEN `connected`** (ADR-0006). Beyond plain wrappers it
+  needed: a **TLS-terminating reverse proxy** (`src/adt-ls/tls-reverse-proxy.ts`)
+  for the self-signed cert (trust+hostname), a **truststore** built from adt-ls's
+  own JRE (`src/adt-ls/cert.ts`), `authenticationKind:reentranceTicket`, and
+  fire-and-forget ticket delivery. Driver gained a pluggable server→client request
+  handler (`routeServerRequest`) + `extraEnv` (JAVA_TOOL_OPTIONS). Engine wires it
+  all (`connectDestination`); config gained `ARC1_SAP_*` (`SapTargetConfig`).
+- [x] Gated local integration test (`tests/unit/adt-ls/logon.smoke.test.ts`, skips
+  without `ARC1_TEST_SAP_PASSWORD`): real `startEngine()` → `connected` → backend
+  `get_all_creatable_objects` returns real data. **Verified live vs a4h.**
+- [~] `read_source` tool — DEFERRED. adt-ls's MCP has no read tool; `read_source`
+  must use LSP `adtLs/fileSystem/readFile`, whose response shape needs nailing (a
+  bare `{}` came back in the spike). Shipped `list_creatable_objects` (federated,
+  proven) as the first destination-backed tool instead. read_source → Task 4.5.
+- [x] Run `npm test` — 77 passing (gated logon/cert/proxy run when deps present).
 
 ### Task 4: Wire bridge + adt-ls proxy routing  ⚠ KEY UNKNOWN — spike first
 
