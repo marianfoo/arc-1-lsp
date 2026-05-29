@@ -37,8 +37,15 @@ export interface Arc1LspConfig {
   httpPort: number;
   /** API keys for the HTTP edge (comma-separated `key` or `key:label`); empty = auth disabled. */
   apiKeys?: string;
-  /** Optional SAP backend to auto-connect on startup. */
+  /** Optional SAP backend to auto-connect on startup (local/direct). */
   sapTarget?: SapTargetConfig;
+  /**
+   * BTP Destination Service name to resolve + connect on startup (CF path). When
+   * running on BTP with a connectivity binding, this destination supplies the
+   * virtual host, basic creds, and Cloud-Connector location. Takes precedence
+   * over `sapTarget` on BTP.
+   */
+  sapDestination?: string;
 }
 
 function bool(v: string | undefined, dflt: boolean): boolean {
@@ -89,5 +96,6 @@ export function loadConfig(
     httpPort: httpPort ? Number(httpPort) : 8080,
     apiKeys: flag(argv, 'api-keys') ?? env.ARC1_API_KEYS,
     sapTarget: loadSapTarget(argv, env),
+    sapDestination: flag(argv, 'sap-destination') ?? env.ARC1_SAP_DESTINATION,
   };
 }

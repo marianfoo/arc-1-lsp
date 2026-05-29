@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { promises as fsp } from 'node:fs';
+import http from 'node:http';
 import https from 'node:https';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
@@ -108,6 +109,37 @@ describe.skipIf(!enabled)('startTlsReverseProxy (needs openssl)', () => {
       expect(res.status).toBe(502);
     } finally {
       await p.close();
+    }
+  });
+
+  it('forwardProxy mode: re-emits an absolute-form request to the bridge (CF path)', async () => {
+    // Mock connectivity bridge: a plain HTTP server that sees the absolute URL.
+    let bridgeSaw: { url?: string; host?: string } = {};
+    const bridge = await new Promise<{ port: number; close: () => void }>((resolve) => {
+      const s = http.createServer((req, res) => {
+        bridgeSaw = { url: req.url, host: req.headers.host };
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end('bridge relayed');
+      });
+      s.listen(0, '127.0.0.1', () => resolve({ port: (s.address() as AddressInfo).port, close: () => s.close() }));
+    });
+
+    const p = await startTlsReverseProxy({
+      key,
+      cert,
+      target: { host: 'a4h-virtual', port: 50001, protocol: 'http' },
+      forwardProxy: { host: '127.0.0.1', port: bridge.port },
+    });
+    try {
+      const res = await httpsGet(`${p.url}/sap/bc/adt/discovery`);
+      expect(res.status).toBe(200);
+      expect(res.body).toBe('bridge relayed');
+      // The bridge must receive the ABSOLUTE-form URL + the virtual-host Host header.
+      expect(bridgeSaw.url).toBe('http://a4h-virtual:50001/sap/bc/adt/discovery');
+      expect(bridgeSaw.host).toBe('a4h-virtual:50001');
+    } finally {
+      await p.close();
+      bridge.close();
     }
   });
 });

@@ -6,7 +6,11 @@
  * When a SAP target is configured, the engine also performs the headless
  * connection (ADR-0005/0006): build TLS material from adt-ls's own JRE, start a
  * TLS-terminating reverse proxy, spawn adt-ls trusting it, then create the
- * destination + reentrance-logon + bind it to adt-ls's MCP server.
+ * destination + reentrance-logon + bind it to adt-ls's MCP server. Two paths:
+ *   - DIRECT (local, ARC1_SAP_*): reverse proxy connects straight to the backend.
+ *   - CONNECTIVITY (CF, ARC1_SAP_DESTINATION + bound connectivity): resolve the
+ *     BTP destination, start the connectivity bridge, and forward the reverse
+ *     proxy's upstream through it → Cloud Connector → backend.
  */
 import crypto from 'node:crypto';
 import { promises as fsp } from 'node:fs';
@@ -14,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { prepareAdtLsTls } from '../adt-ls/cert.js';
 import {
+  type LogonCredentials,
   REQUEST_BROWSER_LOGON,
   createDestination,
   ensureLoggedOn,
@@ -25,6 +30,11 @@ import { AdtLsDriver } from '../adt-ls/driver.js';
 import { AdtLsMcpClient, type McpTool } from '../adt-ls/mcp-federation.js';
 import { setMcpDestination, startMcpServer, stopMcpServer } from '../adt-ls/mcp-lifecycle.js';
 import { type TlsReverseProxy, startTlsReverseProxy } from '../adt-ls/tls-reverse-proxy.js';
+import { type ConnectivityBridge, startConnectivityBridge } from '../btp/bridge.js';
+import { createConnectivityProxy } from '../btp/connectivity.js';
+import { lookupDestination } from '../btp/destination.js';
+import type { BTPConfig } from '../btp/types.js';
+import { parseVCAPServices } from '../btp/vcap.js';
 import type { Arc1LspConfig, SapTargetConfig } from './config.js';
 import { logger } from './logger.js';
 
@@ -44,32 +54,48 @@ export interface Engine {
   dispose(): Promise<void>;
 }
 
+/** Minimal info needed to create + logon a destination (mode-agnostic). */
+export interface BackendDescriptor {
+  destinationId: string;
+  user?: string;
+  client: string;
+  language: string;
+}
+
+export type ConnectionPlan =
+  | { mode: 'none' }
+  | { mode: 'direct'; target: SapTargetConfig }
+  | { mode: 'connectivity'; destinationName: string };
+
+/**
+ * Decide how to connect (pure). On BTP (connectivity bound) a destination name
+ * wins → Cloud-Connector path. Otherwise a full local target → direct. Else none.
+ */
+export function planConnection(config: Arc1LspConfig, btp: BTPConfig | null): ConnectionPlan {
+  const onBtp = !!btp?.connectivityProxyHost;
+  if (onBtp && config.sapDestination) return { mode: 'connectivity', destinationName: config.sapDestination };
+  if (config.sapTarget) return { mode: 'direct', target: config.sapTarget };
+  return { mode: 'none' };
+}
+
 export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   const bin = resolveAdtLsPath({ explicitPath: config.adtLsPath });
   logger.info(`engine: using adt-ls at ${bin}`);
 
-  const target = config.sapTarget;
-  // TLS material + reverse proxy + logon handler, only when a SAP target is set.
-  let tlsWorkDir: string | undefined;
-  let proxy: TlsReverseProxy | undefined;
-  const driverOpts: ConstructorParameters<typeof AdtLsDriver>[1] = {};
+  const btp = parseVCAPServices();
+  const plan = planConnection(config, btp);
 
-  if (target) {
+  // TLS material must exist before adt-ls spawns (JAVA_TOOL_OPTIONS truststore).
+  let tlsWorkDir: string | undefined;
+  let proxyKeyPem: string | undefined;
+  let proxyCertPem: string | undefined;
+  const driverOpts: ConstructorParameters<typeof AdtLsDriver>[1] = {};
+  if (plan.mode !== 'none') {
     tlsWorkDir = path.join(os.tmpdir(), `arc1lsp-tls-${crypto.randomBytes(6).toString('hex')}`);
     const tls = await prepareAdtLsTls({ adtLsBin: bin, workDir: tlsWorkDir });
-    proxy = await startTlsReverseProxy({
-      key: tls.proxyKeyPem,
-      cert: tls.proxyCertPem,
-      target: { host: target.host, port: target.port },
-      insecureUpstream: target.insecure,
-    });
+    proxyKeyPem = tls.proxyKeyPem;
+    proxyCertPem = tls.proxyCertPem;
     driverOpts.extraEnv = { JAVA_TOOL_OPTIONS: tls.javaToolOptions };
-    driverOpts.requestHandlers = {
-      [REQUEST_BROWSER_LOGON]: makeReentranceLogonHandler(
-        { kind: 'basic', user: target.user, password: target.password },
-        { insecure: target.insecure },
-      ),
-    };
   }
 
   const driver = new AdtLsDriver(bin, driverOpts);
@@ -82,9 +108,19 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   const federation = new AdtLsMcpClient(`http://localhost:${started.port}/mcp`, started.token);
   await federation.connect();
 
+  let proxy: TlsReverseProxy | undefined;
+  let bridge: ConnectivityBridge | undefined;
   let connectedDestination: string | undefined;
-  if (target && proxy) {
-    connectedDestination = await connectDestination(driver, target, proxy, tlsWorkDir as string);
+
+  if (plan.mode !== 'none') {
+    const conn = await connect(plan, btp, driver, {
+      keyPem: proxyKeyPem as string,
+      certPem: proxyCertPem as string,
+      tlsWorkDir: tlsWorkDir as string,
+    });
+    proxy = conn.proxy;
+    bridge = conn.bridge;
+    connectedDestination = conn.destinationId;
   }
 
   const engine: Engine = {
@@ -103,16 +139,68 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
       await stopMcpServer(driver).catch(() => {});
       await driver.dispose();
       await proxy?.close().catch(() => {});
+      await bridge?.close().catch(() => {});
       if (tlsWorkDir) await fsp.rm(tlsWorkDir, { recursive: true, force: true }).catch(() => {});
     },
   };
   return engine;
 }
 
+/** Resolve the backend, start the proxy (+bridge on CF), register the logon handler, connect. */
+async function connect(
+  plan: Exclude<ConnectionPlan, { mode: 'none' }>,
+  btp: BTPConfig | null,
+  driver: AdtLsDriver,
+  tls: { keyPem: string; certPem: string; tlsWorkDir: string },
+): Promise<{ proxy: TlsReverseProxy; bridge?: ConnectivityBridge; destinationId: string }> {
+  let backend: BackendDescriptor;
+  let creds: LogonCredentials;
+  let proxy: TlsReverseProxy;
+  let bridge: ConnectivityBridge | undefined;
+
+  if (plan.mode === 'connectivity') {
+    const dest = await lookupDestination(btp as BTPConfig, plan.destinationName);
+    const url = new URL(dest.URL);
+    const scheme = url.protocol === 'https:' ? 'https' : 'http';
+    const port = Number(url.port || (scheme === 'https' ? 443 : 80));
+    creds = { kind: 'basic', user: dest.User ?? '', password: dest.Password ?? '' };
+    backend = {
+      destinationId: plan.destinationName,
+      user: dest.User,
+      client: dest['sap-client'] ?? '001',
+      language: 'EN',
+    };
+    const proxyCfg = createConnectivityProxy(btp as BTPConfig, dest.CloudConnectorLocationId);
+    if (!proxyCfg) throw new Error('connectivity service binding missing onpremise_proxy_host');
+    bridge = await startConnectivityBridge(proxyCfg);
+    proxy = await startTlsReverseProxy({
+      key: tls.keyPem,
+      cert: tls.certPem,
+      target: { host: url.hostname, port, protocol: scheme },
+      forwardProxy: { host: '127.0.0.1', port: bridge.port },
+    });
+  } else {
+    const t = plan.target;
+    creds = { kind: 'basic', user: t.user, password: t.password };
+    backend = { destinationId: t.destinationId, user: t.user, client: t.client, language: t.language };
+    proxy = await startTlsReverseProxy({
+      key: tls.keyPem,
+      cert: tls.certPem,
+      target: { host: t.host, port: t.port },
+      insecureUpstream: t.insecure,
+    });
+  }
+
+  // Register the reentrance handler (our own GET to the localhost proxy skips TLS).
+  driver.setRequestHandler(REQUEST_BROWSER_LOGON, makeReentranceLogonHandler(creds, { insecure: true }));
+  const destinationId = await connectDestination(driver, backend, proxy, tls.tlsWorkDir);
+  return { proxy, bridge, destinationId };
+}
+
 /** Create + reentrance-logon + bind the destination. Returns its id, or throws. */
 export async function connectDestination(
   driver: AdtLsDriver,
-  target: SapTargetConfig,
+  backend: BackendDescriptor,
   proxy: TlsReverseProxy,
   tlsWorkDir: string,
 ): Promise<string> {
@@ -122,20 +210,20 @@ export async function connectDestination(
   await initializeDestinationsService(driver, storePath);
 
   await createDestination(driver, {
-    id: target.destinationId,
+    id: backend.destinationId,
     systemUrl: proxy.url,
-    user: target.user,
-    client: target.client,
-    language: target.language,
+    user: backend.user,
+    client: backend.client,
+    language: backend.language,
   });
 
-  const logon = await ensureLoggedOn(driver, target.destinationId);
+  const logon = await ensureLoggedOn(driver, backend.destinationId);
   if (logon.logonState !== 'connected') {
     throw new Error(
-      `adt-ls logon to ${target.destinationId} failed: ${logon.logonState}${logon.message ? ` — ${logon.message}` : ''}`,
+      `adt-ls logon to ${backend.destinationId} failed: ${logon.logonState}${logon.message ? ` — ${logon.message}` : ''}`,
     );
   }
-  await setMcpDestination(driver, target.destinationId);
-  logger.info(`engine: connected destination ${target.destinationId} (${target.host}:${target.port})`);
-  return target.destinationId;
+  await setMcpDestination(driver, backend.destinationId);
+  logger.info(`engine: connected destination ${backend.destinationId}`);
+  return backend.destinationId;
 }
