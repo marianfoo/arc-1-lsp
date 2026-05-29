@@ -64,6 +64,16 @@ describe('engine headless logon (needs adt-ls + ARC1_TEST_SAP_PASSWORD)', () => 
       // list_generators (federated) returns ≥1 generator.
       const gens = await engine.callTool('abap_generators-list_generators', { destination: 'A4H' });
       expect(JSON.stringify(gens)).toContain('generators');
+
+      // get_service_binding: find an SRVB via search, then fetch its OData info.
+      const srvbs = await engine.search('*', { maxResults: 50, types: ['SRVB/SVB'] });
+      if (srvbs[0]?.name) {
+        const binding = await engine.callTool('abap_business_services-fetch_services', {
+          destination: 'A4H',
+          serviceBindingName: srvbs[0].name,
+        });
+        expect(JSON.stringify(binding)).toMatch(/bindingType|odata/i);
+      }
     },
     120000,
   );

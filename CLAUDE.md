@@ -25,6 +25,9 @@ so understand the **why** before changing anything:
 - **`docs/adt-ls-tool-surface.md`** — what's reachable headless for building tools:
   the 14 federated MCP tools, the LSP method map, quickSearch's exact params, and
   the `read_source` HARD BLOCKER (readFile needs VS Code's workspace/tree model).
+- **`docs/arc-1-feature-parity.md`** — arc-1 vs arc-1-lsp coverage + per-capability
+  "implemented? why/why-not" (the workspace-model block gates read/test/activate/
+  navigation alike). Read before adding tools, to know what's actually reachable.
 - **`docs/plans/`** — ralphex plans (completed + in-progress) per roadmap state.
 
 ## Design principles (non-negotiable)
@@ -72,7 +75,7 @@ src/
     ├── engine.ts            # discover→spawn→startMCP→federate; planConnection + connect (direct|CC); search/listInactive
     └── server.ts            # McpServer + read tools (health, list_destinations, list_creatable_objects,
     │                        #   search_objects, list_inactive_objects, list_users, list_generators,
-    │                        #   get_generator_schema, get_object_type_details)
+    │                        #   get_generator_schema, get_object_type_details, get_service_binding)
 tests/unit/…                 # vitest; adt-ls/SAP-dependent tests are skipIf-gated
 docs/plans/…                 # ralphex plans (one per roadmap state)
 ```

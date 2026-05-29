@@ -33,6 +33,7 @@ describe('createMcpServer', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       'get_generator_schema',
       'get_object_type_details',
+      'get_service_binding',
       'health',
       'list_creatable_objects',
       'list_destinations',
@@ -181,5 +182,23 @@ describe('createMcpServer', () => {
       const res = await client.callTool({ name, arguments: {} });
       expect(JSON.stringify(res.content)).toContain('No ABAP destination is connected');
     }
+  });
+
+  it('get_service_binding passes serviceBindingName + destination to the federated tool', async () => {
+    let got: { name?: string; args?: Record<string, unknown> } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        callTool: async (name, args) => {
+          got = { name, args };
+          return { content: [{ type: 'text', text: '{"bindingType":"ODATA"}' }] };
+        },
+      }),
+    );
+    await client.callTool({ name: 'get_service_binding', arguments: { serviceBindingName: '/DMO/API_TRAVEL_U_V2' } });
+    expect(got).toEqual({
+      name: 'abap_business_services-fetch_services',
+      args: { destination: 'A4H', serviceBindingName: '/DMO/API_TRAVEL_U_V2' },
+    });
   });
 });

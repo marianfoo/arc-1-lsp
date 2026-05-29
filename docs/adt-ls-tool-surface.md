@@ -10,11 +10,14 @@ All take a `destination` (the connected destination id) + their own args:
 - `abap_creation-get_all_creatable_objects` `{destination}` → object-type catalog. ✅ wired as `list_creatable_objects`.
 - `abap_creation-get_object_type_details` `{destination,objectType,name}` → `{fields:[…]}` creation metadata (read). ✅ wired as `get_object_type_details`.
 - `abap_creation-run_validation` / `create_object` — object creation (mutating).
-- `abap_activate_objects` `{uris:[…]}` — activate (mutating).
-- `abap_run_unit_tests` `{uris:[…]}` — run ABAP Unit.
+- `abap_activate_objects` `{uris:[…]}` — activate. ❌ BLOCKED headless: "URI does not
+  contain a AFF file name" (needs the workspace AFF URI, not a raw path).
+- `abap_run_unit_tests` `{uris:[…]}` — run ABAP Unit. ❌ BLOCKED headless: "Project
+  could not be determined from URI" (needs a project/workspace-resolved URI). Same
+  root as read_source — see `docs/arc-1-feature-parity.md` §4.
 - `abap_transport-get` — needs `{destination,developmentPackage,objectName,objectType}` (NOT just destination — "developmentPackage missing"); `abap_transport-create` (mutating).
 - `abap_generators-list_generators` `{destination}` → `{generators:[{title,description}]}` (read). ✅ wired as `list_generators`. `get_schema` `{destination,generatorId}` → schema (read). ✅ wired as `get_generator_schema`. `generate_objects` (mutating).
-- `abap_business_services-fetch_services` / `fetch_service_information` — need `serviceBindingName` (a4h: "resource name [] is invalid" without it).
+- `abap_business_services-fetch_services` `{destination,serviceBindingName}` → OData service info. ✅ wired as `get_service_binding` (binding names via `search_objects types:["SRVB/SVB"]`). `fetch_service_information` needs `{serviceBindingName,serviceName,serviceVersion}` (not wired).
 
 ## LSP methods — `driver.sendRequest(method, params)`
 Verified working headless:

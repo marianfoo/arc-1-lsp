@@ -162,5 +162,23 @@ export function createMcpServer(engine: Engine): McpServer {
     },
   );
 
+  server.registerTool(
+    'get_service_binding',
+    {
+      description:
+        'Inspect a published OData service binding (SRVB): binding type, OData version, published state, and service URIs. Find binding names via `search_objects` with types ["SRVB/SVB"].',
+      inputSchema: {
+        serviceBindingName: z.string().describe('Service binding name, e.g. "/DMO/API_TRAVEL_U_V2".'),
+      },
+    },
+    async ({ serviceBindingName }) => {
+      const dest = engine.connectedDestination;
+      if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
+      return text(
+        await engine.callTool('abap_business_services-fetch_services', { destination: dest, serviceBindingName }),
+      );
+    },
+  );
+
   return server;
 }
