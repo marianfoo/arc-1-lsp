@@ -15,3 +15,15 @@ applications:
     env:
       ARC1_TRANSPORT: http-streamable
       ARC1_LOG_LEVEL: info
+    # SAP connection + API key are set via `cf set-env` (secrets, never committed):
+    #   DIRECT mode (internet-reachable backend, e.g. a4h):
+    #     cf set-env arc-1-lsp ARC1_SAP_HOST a4h.marianzeis.de
+    #     cf set-env arc-1-lsp ARC1_SAP_PORT 50001
+    #     cf set-env arc-1-lsp ARC1_SAP_USER DEVELOPER
+    #     cf set-env arc-1-lsp ARC1_SAP_PASSWORD <secret>
+    #     cf set-env arc-1-lsp ARC1_SAP_DESTINATION A4H   # adt-ls destination id
+    #   CC mode (on-prem via Cloud Connector): bind connectivity+destination, then
+    #     cf set-env arc-1-lsp ARC1_SAP_DESTINATION <btp-destination-name>
+    #     (unset the direct ARC1_SAP_* so planConnection picks connectivity mode)
+    #   Edge auth:  cf set-env arc-1-lsp ARC1_API_KEYS <key>[:label]
+    # Re-push tip: `cf stop arc-1-lsp` first if the org memory quota is tight.

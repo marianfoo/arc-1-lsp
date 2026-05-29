@@ -220,18 +220,29 @@ a clear error otherwise.
   adt-ls tool/LSP request with the right args; destination-missing error path.
 - [ ] Run `npm test`.
 
-### Task 5: Bind services + deploy + verify on CF
+### Task 5: Deploy + verify on CF ✅ (DIRECT mode; CC mode code-ready)
 
-**Files:**
-- Modify: `manifest.yml`
+**Files:** `Dockerfile` (added `openssl`, required by `cert.ts`), `manifest.yml`.
 
-- [ ] `cf create-service`/`bind-service` `connectivity` (lite) + `destination`
-  (lite) to `arc-1-lsp` (or add `services:` to the manifest).
-- [ ] `cf set-env ARC1_SAP_DESTINATION SAP_TRIAL`, `ARC1_SAP_USER DEVELOPER`,
-  `ARC1_SAP_PASSWORD <secret>`; restage.
-- [ ] Verify on the live route: `list_destinations` returns the a4h destination;
-  `read_source` reads a class from a4h **through the Cloud Connector**.
-- [ ] `cf logs` shows the bridge forwarding + adt-ls logon success.
+**DONE — verified live on `https://arc-1-lsp.cfapps.us10-001.hana.ondemand.com`:**
+- [x] a4h is **internet-reachable** (`a4h.marianzeis.de:50001`), so v1 deploys in
+  **DIRECT mode** (no Cloud Connector needed): `cf set-env ARC1_SAP_HOST/PORT/USER/
+  PASSWORD/DESTINATION` (secret via set-env, never committed), `cf push`.
+- [x] CF logs show the full chain: `adt-ls ready` → `tls-reverse-proxy → a4h:50001`
+  → **`engine: connected destination A4H`** → MCP ready.
+- [x] Public MCP endpoint (API-key auth): `health` → `connectedDestination: A4H`;
+  `list_creatable_objects` → real a4h catalog (CLAS/OC, BDEF/BDO, DDLS/DF, …).
+- [x] `openssl` added to the image (node:22-slim lacks the CLI); engine made
+  **non-fatal** on logon failure (server still starts, reports disconnected).
+- Deploy gotchas captured: org memory quota is tight — `cf stop arc-1-lsp` before
+  re-push (avoids transient 2×2G); private ghcr image → `CF_DOCKER_PASSWORD=$(gh
+  auth token)`.
+
+**CC mode (Task 4 code) — not yet deployed:** needs a running Cloud Connector +
+a `connectivity`+`destination` binding + a BTP destination (e.g. `SAP_TRIAL`) for
+a4h. To switch: bind the services, `cf set-env ARC1_SAP_DESTINATION <name>` (clear
+the direct `ARC1_SAP_HOST/PORT/USER/PASSWORD`), restage — `planConnection` then
+picks connectivity mode automatically. Verify via `cf logs` (bridge forwarding).
 
 ### Task 6: Docs + shared-module note + wrap up
 

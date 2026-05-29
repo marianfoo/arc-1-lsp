@@ -10,6 +10,7 @@ FROM node:22-slim
 # Debian slim. Refined empirically; see docs/native-deps.md.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
+      openssl \
       fontconfig \
       libfreetype6 \
       libgtk-3-0 \

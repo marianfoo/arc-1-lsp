@@ -113,14 +113,22 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   let connectedDestination: string | undefined;
 
   if (plan.mode !== 'none') {
-    const conn = await connect(plan, btp, driver, {
-      keyPem: proxyKeyPem as string,
-      certPem: proxyCertPem as string,
-      tlsWorkDir: tlsWorkDir as string,
-    });
-    proxy = conn.proxy;
-    bridge = conn.bridge;
-    connectedDestination = conn.destinationId;
+    // Non-fatal: a logon/connectivity failure must NOT crash the MCP server —
+    // health/tools still come up (reporting disconnected) so it's diagnosable.
+    try {
+      const conn = await connect(plan, btp, driver, {
+        keyPem: proxyKeyPem as string,
+        certPem: proxyCertPem as string,
+        tlsWorkDir: tlsWorkDir as string,
+      });
+      proxy = conn.proxy;
+      bridge = conn.bridge;
+      connectedDestination = conn.destinationId;
+    } catch (e) {
+      logger.error(
+        `engine: SAP connection failed (server starts disconnected): ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   const engine: Engine = {
