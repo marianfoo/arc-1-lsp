@@ -1,6 +1,6 @@
 node_modules/
 dist/
-vendor/adt-ls/
+vendor/
 *.log
 .env
 .arc1-cache.db
