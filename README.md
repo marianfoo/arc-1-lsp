@@ -132,6 +132,38 @@ services, set only `ARC1_SAP_DESTINATION <btp-destination-name>` (drop the direc
 `ARC1_SAP_HOST/PORT/USER/PASSWORD`), restage — the engine resolves the destination
 and routes through the bridge automatically.
 
+## Test a running instance (local or CF)
+
+The `/mcp` endpoint is **stateless** StreamableHTTP — a bare `tools/call` works, no
+session handshake. Quickest smoke test:
+
+```bash
+ARC1_URL=https://arc-1-lsp.cfapps.us10-001.hana.ondemand.com/mcp \
+ARC1_KEY=<api-key> bash scripts/smoke-remote.sh
+# → /healthz ok · health {connectedDestination} · tools/list · list_creatable_objects
+```
+
+Or point any MCP client at the remote endpoint with the key as a bearer header:
+
+```jsonc
+// Claude Code:  claude mcp add --transport http arc1lsp \
+//   https://arc-1-lsp.cfapps.us10-001.hana.ondemand.com/mcp \
+//   --header "Authorization: Bearer <api-key>"
+//
+// Cursor / Claude Desktop / VS Code (mcp.json):
+{
+  "mcpServers": {
+    "arc1lsp": {
+      "url": "https://arc-1-lsp.cfapps.us10-001.hana.ondemand.com/mcp",
+      "headers": { "Authorization": "Bearer <api-key>" }
+    }
+  }
+}
+```
+
+Or the GUI inspector: `npx @modelcontextprotocol/inspector` → Streamable HTTP →
+the `/mcp` URL → add header `Authorization: Bearer <api-key>`.
+
 ## Status & roadmap
 
 **Connected on BTP CF (Step 4) — green.** spawn adt-ls headless → start its MCP
