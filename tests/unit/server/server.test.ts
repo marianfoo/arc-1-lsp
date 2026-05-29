@@ -13,6 +13,15 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
     search: async () => [],
     listInactiveObjects: async () => [],
     listUsers: async () => [],
+    lifecycle: {
+      resolveAffUri: async () => 'abap:/repotree-v1/A4H/x.clas.abap',
+      readSource: async () => 'CLASS zcl_x.',
+      createObject: async () => ({ message: 'created', filePath: 'abap:/x.clas.abap' }),
+      updateSource: async () => {},
+      activate: async () => ({ success: true, diagnostics: [] }),
+      runUnitTests: async () => ({ result: 'No tests found' }),
+      deleteObject: async () => {},
+    },
     dispose: async () => {},
     ...overrides,
   };
@@ -31,6 +40,9 @@ describe('createMcpServer', () => {
     const client = await linkedClient(fakeEngine());
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'activate_object',
+      'create_object',
+      'delete_object',
       'get_generator_schema',
       'get_object_type_details',
       'get_service_binding',
@@ -40,7 +52,10 @@ describe('createMcpServer', () => {
       'list_generators',
       'list_inactive_objects',
       'list_users',
+      'read_source',
+      'run_unit_tests',
       'search_objects',
+      'update_source',
     ]);
   });
 
@@ -200,5 +215,72 @@ describe('createMcpServer', () => {
       name: 'abap_business_services-fetch_services',
       args: { destination: 'A4H', serviceBindingName: '/DMO/API_TRAVEL_U_V2' },
     });
+  });
+
+  it('read_source delegates to engine.lifecycle.readSource', async () => {
+    let got: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        lifecycle: {
+          ...fakeEngine().lifecycle,
+          readSource: async (a: unknown) => {
+            got = a;
+            return 'CLASS zcl_x DEFINITION PUBLIC.\nENDCLASS.';
+          },
+        },
+      }),
+    );
+    const res = await client.callTool({ name: 'read_source', arguments: { name: 'ZCL_X', objectType: 'CLAS/OC' } });
+    expect(got).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC', include: undefined });
+    expect(JSON.stringify(res.content)).toContain('CLASS zcl_x');
+  });
+
+  it('create_object maps `package` → packageName for the lifecycle', async () => {
+    let got: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        lifecycle: {
+          ...fakeEngine().lifecycle,
+          createObject: async (a: unknown) => ((got = a), { filePath: 'abap:/x' }),
+        },
+      }),
+    );
+    await client.callTool({
+      name: 'create_object',
+      arguments: { objectType: 'CLAS/OC', name: 'ZCL_X', package: '$TMP', description: 'x' },
+    });
+    expect(got).toEqual({ objectType: 'CLAS/OC', name: 'ZCL_X', packageName: '$TMP', description: 'x' });
+  });
+
+  it('activate_object returns {success, diagnostics}', async () => {
+    const client = await linkedClient(
+      fakeEngine({
+        lifecycle: {
+          ...fakeEngine().lifecycle,
+          activate: async () => ({ success: false, diagnostics: [{ message: 'syntax error' }] }),
+        },
+      }),
+    );
+    const res = await client.callTool({ name: 'activate_object', arguments: { name: 'ZCL_X', objectType: 'CLAS/OC' } });
+    expect(JSON.stringify(res.content)).toContain('syntax error');
+  });
+
+  it('a write tool surfaces a safety error from the lifecycle', async () => {
+    const client = await linkedClient(
+      fakeEngine({
+        lifecycle: {
+          ...fakeEngine().lifecycle,
+          updateSource: async () => {
+            throw new Error('Writes are disabled (read-only mode).');
+          },
+        },
+      }),
+    );
+    const res = await client.callTool({
+      name: 'update_source',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', source: 'X' },
+    });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toContain('Writes are disabled');
   });
 });

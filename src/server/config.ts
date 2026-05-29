@@ -46,6 +46,10 @@ export interface Arc1LspConfig {
    * over `sapTarget` on BTP.
    */
   sapDestination?: string;
+  /** Enable mutating tools (create/update/activate/delete). Default false. */
+  allowWrites: boolean;
+  /** Packages writes may target (exact / `PREFIX*` / `*`). Default `['$TMP']`. */
+  allowedPackages: string[];
 }
 
 function bool(v: string | undefined, dflt: boolean): boolean {
@@ -97,5 +101,10 @@ export function loadConfig(
     apiKeys: flag(argv, 'api-keys') ?? env.ARC1_API_KEYS,
     sapTarget: loadSapTarget(argv, env),
     sapDestination: flag(argv, 'sap-destination') ?? env.ARC1_SAP_DESTINATION,
+    allowWrites: bool(flag(argv, 'allow-writes') ?? env.ARC1_ALLOW_WRITES, false),
+    allowedPackages: (flag(argv, 'allowed-packages') ?? env.ARC1_ALLOWED_PACKAGES ?? '$TMP')
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean),
   };
 }

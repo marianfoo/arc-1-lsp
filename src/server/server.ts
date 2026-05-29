@@ -180,5 +180,83 @@ export function createMcpServer(engine: Engine): McpServer {
     },
   );
 
+  // ── Authoring loop (pure adt-ls; modern ABAP-Cloud object types only) ──
+  const objectType = z
+    .string()
+    .describe('ADT object type code, e.g. "CLAS/OC", "INTF/OI", "DDLS/DF" (modern ABAP-Cloud types).');
+  const include = z
+    .enum(['definitions', 'implementations', 'testclasses', 'macros'])
+    .optional()
+    .describe('Class local include to target; omit for the main source.');
+
+  server.registerTool(
+    'read_source',
+    {
+      description:
+        'Read the source of an ABAP object by name + type (modern types: class/interface/CDS/…). Classic types (program/table/…) are not served by adt-ls headless — use main ARC-1 for those.',
+      inputSchema: { name: z.string(), objectType, include },
+    },
+    async ({ name, objectType: t, include: inc }) =>
+      text(await engine.lifecycle.readSource({ name, objectType: t, include: inc })),
+  );
+
+  server.registerTool(
+    'create_object',
+    {
+      description: 'Create an ABAP object (mutating — requires ARC1_ALLOW_WRITES; package must be in the allowlist).',
+      inputSchema: {
+        objectType,
+        name: z.string(),
+        package: z.string().describe('Development package, e.g. "$TMP".'),
+        description: z.string(),
+      },
+    },
+    async ({ objectType: t, name, package: pkg, description }) =>
+      text(await engine.lifecycle.createObject({ objectType: t, name, packageName: pkg, description })),
+  );
+
+  server.registerTool(
+    'update_source',
+    {
+      description: "Replace an object's source (mutating — requires ARC1_ALLOW_WRITES). Source is plain ABAP text.",
+      inputSchema: { name: z.string(), objectType, source: z.string(), include },
+    },
+    async ({ name, objectType: t, source, include: inc }) => {
+      await engine.lifecycle.updateSource({ name, objectType: t, source, include: inc });
+      return text({ updated: name });
+    },
+  );
+
+  server.registerTool(
+    'activate_object',
+    {
+      description:
+        'Activate an object (mutating — requires ARC1_ALLOW_WRITES). Returns {success, diagnostics}; on syntax errors success is false with ranged diagnostics.',
+      inputSchema: { name: z.string(), objectType },
+    },
+    async ({ name, objectType: t }) => text(await engine.lifecycle.activate({ name, objectType: t })),
+  );
+
+  server.registerTool(
+    'run_unit_tests',
+    {
+      description: 'Run ABAP Unit tests for an object by name + type.',
+      inputSchema: { name: z.string(), objectType },
+    },
+    async ({ name, objectType: t }) => text(await engine.lifecycle.runUnitTests({ name, objectType: t })),
+  );
+
+  server.registerTool(
+    'delete_object',
+    {
+      description: 'Delete an ABAP object (mutating — requires ARC1_ALLOW_WRITES).',
+      inputSchema: { name: z.string(), objectType },
+    },
+    async ({ name, objectType: t }) => {
+      await engine.lifecycle.deleteObject({ name, objectType: t });
+      return text({ deleted: name });
+    },
+  );
+
   return server;
 }

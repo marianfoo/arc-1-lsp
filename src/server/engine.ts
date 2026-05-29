@@ -27,6 +27,7 @@ import {
 } from '../adt-ls/destinations.js';
 import { resolveAdtLsPath } from '../adt-ls/discovery.js';
 import { AdtLsDriver } from '../adt-ls/driver.js';
+import { type Lifecycle, createLifecycle } from '../adt-ls/lifecycle.js';
 import { AdtLsMcpClient, type McpTool } from '../adt-ls/mcp-federation.js';
 import { setMcpDestination, startMcpServer, stopMcpServer } from '../adt-ls/mcp-lifecycle.js';
 import { type SearchReference, type UserRef, getInactiveObjects, getUsers, quickSearch } from '../adt-ls/repository.js';
@@ -56,6 +57,8 @@ export interface Engine {
   listInactiveObjects(): Promise<unknown[]>;
   /** System users on the connected destination (LSP). */
   listUsers(): Promise<UserRef[]>;
+  /** ABAP object authoring lifecycle (read/create/update/activate/test/delete). */
+  lifecycle: Lifecycle;
   /** The destination logged on at startup, if any. */
   connectedDestination?: string;
   dispose(): Promise<void>;
@@ -138,8 +141,16 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     }
   }
 
+  const lifecycle = createLifecycle({
+    driver,
+    callTool: (name, args = {}) => federation.callTool(name, args),
+    destination: () => connectedDestination,
+    safety: { allowWrites: config.allowWrites, allowedPackages: config.allowedPackages },
+  });
+
   const engine: Engine = {
     connectedDestination,
+    lifecycle,
     health: () => ({
       adtLs: { name: init.serverInfo?.name, version: init.serverInfo?.version, up: true },
       mcpPort: started.port,

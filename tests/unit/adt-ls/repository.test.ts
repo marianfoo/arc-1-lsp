@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AdtLsDriver } from '../../../src/adt-ls/driver.js';
-import { getInactiveObjects, getUsers, quickSearch } from '../../../src/adt-ls/repository.js';
+import {
+  getInactiveObjects,
+  getLsUri,
+  getUsers,
+  includeAffUri,
+  isUnsupportedPlaceholder,
+  metadataAffUri,
+  quickSearch,
+} from '../../../src/adt-ls/repository.js';
 
 function fakeDriver(reply: unknown) {
   const calls: Array<{ method: string; params: unknown }> = [];
@@ -50,5 +58,37 @@ describe('getUsers', () => {
   it('returns [] when the response has no users', async () => {
     const { driver } = fakeDriver({});
     expect(await getUsers(driver, 'A4H')).toEqual([]);
+  });
+});
+
+describe('getLsUri', () => {
+  it('sends {destination, adtUri} (param key is adtUri) and returns the repotree URI', async () => {
+    const { driver, calls } = fakeDriver({ uri: 'abap:/repotree-v1/A4H/x.clas.abap' });
+    const uri = await getLsUri(driver, 'A4H', '/sap/bc/adt/oo/classes/zcl_x');
+    expect(calls[0]).toEqual({
+      method: 'adtLs/repository/getLsUri',
+      params: { destination: 'A4H', adtUri: '/sap/bc/adt/oo/classes/zcl_x' },
+    });
+    expect(uri).toBe('abap:/repotree-v1/A4H/x.clas.abap');
+  });
+  it('throws when no uri comes back', async () => {
+    const { driver } = fakeDriver({});
+    await expect(getLsUri(driver, 'A4H', '/x')).rejects.toThrow(/no uri/);
+  });
+});
+
+describe('AFF URI helpers', () => {
+  const main = 'abap:/repotree-v1/A4H/Classes/ZCL_X/zcl_x.clas.abap';
+  it('includeAffUri swaps to the class include file', () => {
+    expect(includeAffUri(main, 'definitions')).toBe('abap:/repotree-v1/A4H/Classes/ZCL_X/zcl_x.clas.definitions.abap');
+    expect(includeAffUri(main, 'testclasses')).toMatch(/zcl_x\.clas\.testclasses\.abap$/);
+  });
+  it('metadataAffUri swaps the final extension to json', () => {
+    expect(metadataAffUri(main)).toBe('abap:/repotree-v1/A4H/Classes/ZCL_X/zcl_x.clas.json');
+    expect(metadataAffUri('a/b/x.ddls.acds')).toBe('a/b/x.ddls.json');
+  });
+  it('isUnsupportedPlaceholder detects the "use Eclipse" placeholder', () => {
+    expect(isUnsupportedPlaceholder('// The object is not supported in ADT in VS Code. Please use…')).toBe(true);
+    expect(isUnsupportedPlaceholder('CLASS zcl_x DEFINITION.')).toBe(false);
   });
 });
