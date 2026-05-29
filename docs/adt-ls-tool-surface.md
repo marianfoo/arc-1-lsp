@@ -57,6 +57,12 @@ block. `create_object` returns the AFF filePath directly; `delete` takes the
 
 **Remaining gap (engineering, not a wall):** resolving an *existing* object's AFF
 URI **by name** — `search_objects` returns ADT paths, not repotree URIs, and the
-tree is package-organized. For reads, sidestep with a direct ADT GET
-`<adt-path>/source/main` (also proven). For create-flow objects the URI is already
-in hand. See `docs/arc-1-feature-parity.md` §2/§4 for the full corrected picture.
+tree is package-organized. **Must be solved purely in adt-ls** (tree walk, or an
+unexplored `repository/getLsUri`) — the direct-ADT-GET shortcut is REJECTED (no
+hybrid, ADR-0003). For create-flow objects the URI is already in hand. See
+`docs/arc-1-feature-parity.md` §2/§4.
+
+**Full edit lifecycle confirmed (pure adt-ls):** create → `writeFile` (update source,
+plain content) → `readFile` → `lockFile`/`unlockFile` → `activate` → `run_unit_tests`
+→ `delete` (.clas.json). All proven on a4h. Unreached headless: `atc/runCheck`
+("object could not be determined"), `textDocument/*` navigation (hangs).

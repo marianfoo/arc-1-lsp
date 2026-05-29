@@ -75,11 +75,19 @@ auth already works, B) and fragile. **Rejected.**
 | B-full | yes | yes | medium | high | ❌ retreat | all reads |
 | C wait | n/a | n/a | none | n/a | ✅ | maybe, someday |
 
-## Recommendation
-**B-minimal**, framed as a deliberate, documented scope clarification (new ADR):
-*reads may use a thin direct ADT HTTP GET; all mutations/activation/transport stay
-in adt-ls.* It cleanly unblocks the flagship `read_source` by name, reuses the
-connection infra we already built, and the deviation is bounded (read-only,
-stateless, plain text). Revisit toward B-full only if where-used/table-data become
-priorities; keep A in the back pocket for a future package-browser tool; keep C as
-a standing watch-item to delete B if SAP ships a native get-source.
+## Recommendation — SUPERSEDED by the no-hybrid decision (2026-05-29)
+The original recommendation here was **B-minimal** (a thin direct ADT GET). That is
+now **REJECTED**: the user chose **arc-1-lsp = pure adt-ls, no hybrid** (ADR-0003,
+hardened). Direct HTTP ADT — however bounded — is out of scope for this edition.
+
+**Current standing decision:**
+- `read_source` works via **adt-ls `readFile`** on the repotree AFF URI (Approach A).
+  For **create-flow** objects the URI is already in hand → reads/edits/activate work
+  with no resolver. For **arbitrary existing** objects by name, A needs a pure
+  **name→AFF-URI resolver** (tree walk, or an unexplored `repository/getLsUri`).
+- If that resolver proves too flaky to be reliable, **by-name source reads are an
+  arc-1 feature, not arc-1-lsp's** — and that gap is documented as an honest adt-ls
+  limitation (`docs/arc-1-feature-parity.md`), not patched with a hybrid.
+- C (wait for SAP) remains a standing watch-item.
+
+The comparison above is retained for the reasoning; the *verdict* is the bullets here.

@@ -32,8 +32,13 @@ so understand the **why** before changing anything:
 
 ## Design principles (non-negotiable)
 
-1. **Zero hand-rolled ADT.** Never port `src/adt/{http,crud,xml-parser,…}` from
-   ARC-1. CSRF, locking, XML, activation, transport all live in `adt-ls`.
+1. **Zero hand-rolled ADT — HARD LINE, no hybrid.** Never port `src/adt/{http,crud,
+   xml-parser,…}` from ARC-1, and **never make direct HTTP ADT calls** (no
+   `GET /sap/bc/adt/…`) — even when it's trivially easy and the adt-ls path is flaky
+   or missing. CSRF, locking, XML, activation, transport all live in `adt-ls`.
+   **adt-ls's headless capability IS arc-1-lsp's product boundary** — what it can't
+   reach is out of scope here and belongs to main ARC-1. The reverse proxy/bridge
+   carry adt-ls's *own* traffic only. See ADR-0003 + `docs/arc-1-feature-parity.md`.
 2. **BYO `adt-ls`.** Never bundle/commit the binary (SAP Developer License).
    Discover a developer-provided one (`src/adt-ls/discovery.ts`).
 3. **Reuse ARC-1's shell.** MCP server, auth (API key first, XSUAA later), scope
