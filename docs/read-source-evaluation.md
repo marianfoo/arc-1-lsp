@@ -2,6 +2,16 @@
 
 Date: 2026-05-29. All claims live-tested against a4h through the connected engine.
 
+> **CORRECTION (2026-05-29, later same day):** the premise below — that `readFile`
+> is blocked headless — was a **wrong-URI-shape mistake**. `readFile` **WORKS** with
+> the canonical **repotree/AFF URI** (`abap:/repotree-v1/<dest>/…/<obj>.clas.abap`,
+> single-slash) — it returns the source. The `{}` results used the wrong shape
+> (`abap://<dest>/sap/bc/adt/…`). So **Approach A (adt-ls readFile) is actually
+> viable**, not just B. The genuine remaining gap is resolving an *existing*
+> object's AFF URI **by name** (search returns ADT paths, not repotree URIs). See
+> `docs/arc-1-feature-parity.md` §2/§4 for the corrected picture. The comparison
+> below is kept for the reasoning, but read it with this correction in mind.
+
 ## The blocker (recap)
 adt-ls's `adtLs/fileSystem/readFile {uri}` returns `{}` headless for hand-built
 `abap://` URIs. Source-dependent reads (read_source, where-used, documentSymbol,

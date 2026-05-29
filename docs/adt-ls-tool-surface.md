@@ -10,11 +10,16 @@ All take a `destination` (the connected destination id) + their own args:
 - `abap_creation-get_all_creatable_objects` `{destination}` → object-type catalog. ✅ wired as `list_creatable_objects`.
 - `abap_creation-get_object_type_details` `{destination,objectType,name}` → `{fields:[…]}` creation metadata (read). ✅ wired as `get_object_type_details`.
 - `abap_creation-run_validation` / `create_object` — object creation (mutating).
-- `abap_activate_objects` `{uris:[…]}` — activate. ❌ BLOCKED headless: "URI does not
-  contain a AFF file name" (needs the workspace AFF URI, not a raw path).
-- `abap_run_unit_tests` `{uris:[…]}` — run ABAP Unit. ❌ BLOCKED headless: "Project
-  could not be determined from URI" (needs a project/workspace-resolved URI). Same
-  root as read_source — see `docs/arc-1-feature-parity.md` §4.
+- `abap_activate_objects` `{uris:[<AFF filePath>]}` — activate. ✅ **WORKS** with the
+  repotree AFF URI (`abap:/repotree-v1/<dest>/…/<obj>.clas.abap`) → `{success:true}`.
+  (The earlier "URI does not contain a AFF file name" was a wrong-URI-shape error.)
+- `abap_run_unit_tests` `{uris:[<AFF filePath>]}` — run ABAP Unit. ✅ **WORKS** with
+  the AFF URI → results / "No tests found". (Not yet wired.) See
+  `docs/arc-1-feature-parity.md` §2.
+- `abap_creation-create_object` `{destination,objectType,objectContent}` — ✅ **WORKS**;
+  `objectContent` is a JSON **string** `{name,packageName,description}`; returns the
+  AFF filePath. (Mutating; not yet wired.) `fileSystem/readFile` on the AFF
+  `.clas.abap` URI returns source; `fileSystem/delete` on the `.clas.json` removes it.
 - `abap_transport-get` — needs `{destination,developmentPackage,objectName,objectType}` (NOT just destination — "developmentPackage missing"); `abap_transport-create` (mutating).
 - `abap_generators-list_generators` `{destination}` → `{generators:[{title,description}]}` (read). ✅ wired as `list_generators`. `get_schema` `{destination,generatorId}` → schema (read). ✅ wired as `get_generator_schema`. `generate_objects` (mutating).
 - `abap_business_services-fetch_services` `{destination,serviceBindingName}` → OData service info. ✅ wired as `get_service_binding` (binding names via `search_objects types:["SRVB/SVB"]`). `fetch_service_information` needs `{serviceBindingName,serviceName,serviceVersion}` (not wired).
@@ -39,35 +44,19 @@ Need an object/uri arg (not just destination), so usable once we pass one:
 - `adtLs/activation/activate` — activate (mutating).
 - `adtLs/textDocument/insertProposal` — quickfix.
 
-## ⚠ HARD BLOCKER — `read_source` via `adtLs/fileSystem/readFile`
-The extension reads source with `sendRequest('adtLs/fileSystem/readFile', {uri})`
-→ `{content}` (then `Buffer.from(content,'utf8')`). The URI scheme is **`abap://`**
-(not `adt://`); the form `abap://<dest>/sap/bc/adt/oo/classes/<name>/source/main`
-is **syntactically valid** (`getObjectName` parses it, returns the include name).
+## ✅ `read_source` via `adtLs/fileSystem/readFile` — WORKS (corrected 2026-05-29)
+`sendRequest('adtLs/fileSystem/readFile', {uri})` → `{content}` (utf8 source) when
+given the **canonical repotree/AFF URI** — single-slash `abap:/repotree-v1/<dest>/
+<folders…>/<OBJ>/<obj>.clas.abap`. Proven: returned a real class's source.
 
-**But `readFile` always returns `{}` headless** — and `abapStat` returns `{}`,
-`stat` says "File not found", `readDirectory` on a folder → "Internal error" —
-even after `createProject`, a `quickSearch` (whose reference `uri` we reuse),
-`textDocument/didOpen`, and `abapStat` priming. Root cause: adt-ls's FS provider
-only materializes a file's content for URIs surfaced through **VS Code's
-workspace-folder + tree (`readDirectory`) model**; that tree is driven by VS Code
-adding an `abap://` workspace folder and the editor's FS layer walking it. Headless
-we have no workspace-folder mechanism, and `readDirectory` (the traversal that
-would register nodes) errors on hand-built folder URIs. The folder identity is
-`(destination, folderType)` (see `getFolderUri` "Destination and folder type must
-not be null"; `folderType` is numeric 0/2), not a plain path — so the abap: path
-URIs don't map to browsable folders without the VS Code layer.
+The earlier "always returns `{}`" was a **wrong-URI-shape mistake** — those calls
+used `abap://<dest>/sap/bc/adt/…/source/main` (double-slash, ADT-path), which
+`getObjectName` parses but `readFile` rejects (returns `{}`). NOT a workspace-model
+block. `create_object` returns the AFF filePath directly; `delete` takes the
+`.clas.json`; `activate`/`run_unit_tests` take the `.clas.abap` URI — all proven.
 
-**Options for later (not yet done):**
-1. Replicate enough of the workspace/tree model headless — register an `abap://`
-   root, drive `readDirectory` by `(destination, folderType)` to materialize nodes,
-   then `readFile`. Needs reverse-engineering `getFolderUri`'s folderType enum +
-   the readDirectory folder-URI contract.
-2. Re-check each adt-ls release — SAP may expose a direct "get source" LSP/MCP
-   method (none today; the MCP tool set is creation/activation/transport/generators).
-3. Last resort (violates ADR-0003 "zero hand-rolled ADT"): fetch source from the
-   backend ourselves via our own reentrance session — explicitly avoided.
-
-So `read_source` (SAPRead) is **deferred** until option 1 or 2 lands. `search_objects`
-covers object discovery; `list_creatable_objects` + `list_inactive_objects` +
-generators/transport give a useful read-only surface meanwhile.
+**Remaining gap (engineering, not a wall):** resolving an *existing* object's AFF
+URI **by name** — `search_objects` returns ADT paths, not repotree URIs, and the
+tree is package-organized. For reads, sidestep with a direct ADT GET
+`<adt-path>/source/main` (also proven). For create-flow objects the URI is already
+in hand. See `docs/arc-1-feature-parity.md` §2/§4 for the full corrected picture.
