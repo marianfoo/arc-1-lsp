@@ -39,3 +39,15 @@ export function quickSearch(
 export function getInactiveObjects(driver: AdtLsDriver, destinationId: string): Promise<unknown[]> {
   return driver.sendRequest<unknown[]>('adtLs/activation/getInactiveObjects', { destinationId });
 }
+
+/** A repository/system user. */
+export interface UserRef {
+  id: string;
+  text?: string;
+}
+
+/** List system users (e.g. for ownership/transport context). Uses `destination`. */
+export async function getUsers(driver: AdtLsDriver, destination: string): Promise<UserRef[]> {
+  const r = await driver.sendRequest<{ users?: UserRef[] }>('adtLs/repository/getUsers', { destination });
+  return r.users ?? [];
+}

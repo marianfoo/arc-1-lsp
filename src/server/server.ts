@@ -95,5 +95,72 @@ export function createMcpServer(engine: Engine): McpServer {
     },
   );
 
+  server.registerTool(
+    'list_users',
+    {
+      description: 'List the system users on the connected ABAP system (id + display name).',
+      inputSchema: {},
+    },
+    async () => {
+      if (!engine.connectedDestination) {
+        return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
+      }
+      return text(await engine.listUsers());
+    },
+  );
+
+  server.registerTool(
+    'list_generators',
+    {
+      description:
+        'List the object generators available on the connected system (e.g. RAP "OData UI Service") — what `generate_objects` can produce.',
+      inputSchema: {},
+    },
+    async () => {
+      const dest = engine.connectedDestination;
+      if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
+      return text(await engine.callTool('abap_generators-list_generators', { destination: dest }));
+    },
+  );
+
+  server.registerTool(
+    'get_generator_schema',
+    {
+      description:
+        'Get the input schema for a specific object generator (use `generatorId` from list_generators). Read-only.',
+      inputSchema: {
+        generatorId: z.string().describe('Generator id from list_generators.'),
+      },
+    },
+    async ({ generatorId }) => {
+      const dest = engine.connectedDestination;
+      if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
+      return text(await engine.callTool('abap_generators-get_schema', { destination: dest, generatorId }));
+    },
+  );
+
+  server.registerTool(
+    'get_object_type_details',
+    {
+      description:
+        'Describe the fields required to create an object of a given ADT type (e.g. "CLAS/OC") — read-only creation metadata.',
+      inputSchema: {
+        objectType: z.string().describe('ADT object type, e.g. "CLAS/OC", "DDLS/DF".'),
+        name: z.string().optional().describe('Candidate object name (default placeholder).'),
+      },
+    },
+    async ({ objectType, name }) => {
+      const dest = engine.connectedDestination;
+      if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
+      return text(
+        await engine.callTool('abap_creation-get_object_type_details', {
+          destination: dest,
+          objectType,
+          name: name ?? 'Z_PLACEHOLDER',
+        }),
+      );
+    },
+  );
+
   return server;
 }

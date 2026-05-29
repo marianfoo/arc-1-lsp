@@ -8,12 +8,13 @@ requests). Param shapes below are verified unless marked.
 All take a `destination` (the connected destination id) + their own args:
 - `abap_list_destinations` — `{}` → connected destinations.
 - `abap_creation-get_all_creatable_objects` `{destination}` → object-type catalog. ✅ wired as `list_creatable_objects`.
-- `abap_creation-get_object_type_details` / `run_validation` / `create_object` — object creation (mutating).
+- `abap_creation-get_object_type_details` `{destination,objectType,name}` → `{fields:[…]}` creation metadata (read). ✅ wired as `get_object_type_details`.
+- `abap_creation-run_validation` / `create_object` — object creation (mutating).
 - `abap_activate_objects` `{uris:[…]}` — activate (mutating).
 - `abap_run_unit_tests` `{uris:[…]}` — run ABAP Unit.
-- `abap_transport-get` / `abap_transport-create` — CTS transports.
-- `abap_generators-list_generators` / `get_schema` / `generate_objects` `{destination,…}` — RAP/object generators.
-- `abap_business_services-fetch_services` / `fetch_service_information` `{serviceBindingName,…}`.
+- `abap_transport-get` — needs `{destination,developmentPackage,objectName,objectType}` (NOT just destination — "developmentPackage missing"); `abap_transport-create` (mutating).
+- `abap_generators-list_generators` `{destination}` → `{generators:[{title,description}]}` (read). ✅ wired as `list_generators`. `get_schema` `{destination,generatorId}` → schema (read). ✅ wired as `get_generator_schema`. `generate_objects` (mutating).
+- `abap_business_services-fetch_services` / `fetch_service_information` — need `serviceBindingName` (a4h: "resource name [] is invalid" without it).
 
 ## LSP methods — `driver.sendRequest(method, params)`
 Verified working headless:
@@ -21,8 +22,10 @@ Verified working headless:
   → `{references:[{name, description, type, uri}], message}`. **The search field is
   `pattern` (NOT `query`); `destination` (NOT `destinationId`).** `uri` is the ADT
   object path (e.g. `/sap/bc/adt/oo/classes/cl_abap_typedescr`). ✅ → `search_objects`.
-- **`adtLs/activation/getInactiveObjects`** `{destinationId}` → `[]` (inactive drafts).
+- **`adtLs/activation/getInactiveObjects`** `{destinationId}` → `[]` (inactive drafts). ✅ wired as `list_inactive_objects`.
+- **`adtLs/repository/getUsers`** `{destination}` (NOT destinationId) → `{users:[{id,text}]}`. ✅ wired as `list_users`.
 - `adtLs/abapUnit/capabilities` `{destinationId}` → support flags.
+- `adtLs/destinations/list` `{}` → configured destinations (with protocol/url). `listSystemConfigurations` → `[]` on a4h.
 - `adtLs/destinations/createProject` — bare string `"<dest>"` → `true` (sets up the
   destination project; params are NOT `{destinationId}` — that throws "could not be parsed").
 - `adtLs/fileSystem/getObjectName` `{uri}` → object name (parses the URI locally).

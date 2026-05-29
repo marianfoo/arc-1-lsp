@@ -70,8 +70,9 @@ src/
     ├── auth.ts              # API-key edge auth (Bearer | x-api-key)
     ├── http.ts              # http-streamable transport + API-key gate + /healthz
     ├── engine.ts            # discover→spawn→startMCP→federate; planConnection + connect (direct|CC); search/listInactive
-    └── server.ts            # McpServer + tools (health, list_destinations, list_creatable_objects,
-    │                        #   search_objects, list_inactive_objects)
+    └── server.ts            # McpServer + read tools (health, list_destinations, list_creatable_objects,
+    │                        #   search_objects, list_inactive_objects, list_users, list_generators,
+    │                        #   get_generator_schema, get_object_type_details)
 tests/unit/…                 # vitest; adt-ls/SAP-dependent tests are skipIf-gated
 docs/plans/…                 # ralphex plans (one per roadmap state)
 ```

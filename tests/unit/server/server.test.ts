@@ -12,6 +12,7 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
     setDestination: async () => {},
     search: async () => [],
     listInactiveObjects: async () => [],
+    listUsers: async () => [],
     dispose: async () => {},
     ...overrides,
   };
@@ -30,10 +31,14 @@ describe('createMcpServer', () => {
     const client = await linkedClient(fakeEngine());
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'get_generator_schema',
+      'get_object_type_details',
       'health',
       'list_creatable_objects',
       'list_destinations',
+      'list_generators',
       'list_inactive_objects',
+      'list_users',
       'search_objects',
     ]);
   });
@@ -115,5 +120,66 @@ describe('createMcpServer', () => {
     );
     const res = await client.callTool({ name: 'list_inactive_objects', arguments: {} });
     expect(JSON.stringify(res.content)).toContain('ZCL_DRAFT');
+  });
+
+  it('list_users returns engine.listUsers when connected', async () => {
+    const client = await linkedClient(
+      fakeEngine({ connectedDestination: 'A4H', listUsers: async () => [{ id: 'DEVELOPER', text: 'John Doe' }] }),
+    );
+    const res = await client.callTool({ name: 'list_users', arguments: {} });
+    expect(JSON.stringify(res.content)).toContain('DEVELOPER');
+  });
+
+  it('list_generators delegates to the federated generators tool with the connected destination', async () => {
+    let got: { name?: string; args?: Record<string, unknown> } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        callTool: async (name, args) => {
+          got = { name, args };
+          return { content: [{ type: 'text', text: '{"generators":[]}' }] };
+        },
+      }),
+    );
+    await client.callTool({ name: 'list_generators', arguments: {} });
+    expect(got).toEqual({ name: 'abap_generators-list_generators', args: { destination: 'A4H' } });
+  });
+
+  it('get_generator_schema passes generatorId + destination to the federated tool', async () => {
+    let got: { name?: string; args?: Record<string, unknown> } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        callTool: async (name, args) => {
+          got = { name, args };
+          return { content: [{ type: 'text', text: '{}' }] };
+        },
+      }),
+    );
+    await client.callTool({ name: 'get_generator_schema', arguments: { generatorId: 'odata_ui' } });
+    expect(got).toEqual({ name: 'abap_generators-get_schema', args: { destination: 'A4H', generatorId: 'odata_ui' } });
+  });
+
+  it('get_object_type_details passes objectType + default name placeholder', async () => {
+    let got: { args?: Record<string, unknown> } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        callTool: async (_name, args) => {
+          got = { args };
+          return { content: [{ type: 'text', text: '{"fields":[]}' }] };
+        },
+      }),
+    );
+    await client.callTool({ name: 'get_object_type_details', arguments: { objectType: 'CLAS/OC' } });
+    expect(got.args).toEqual({ destination: 'A4H', objectType: 'CLAS/OC', name: 'Z_PLACEHOLDER' });
+  });
+
+  it('the new read tools error clearly with no destination', async () => {
+    const client = await linkedClient(fakeEngine());
+    for (const name of ['list_users', 'list_generators']) {
+      const res = await client.callTool({ name, arguments: {} });
+      expect(JSON.stringify(res.content)).toContain('No ABAP destination is connected');
+    }
   });
 });

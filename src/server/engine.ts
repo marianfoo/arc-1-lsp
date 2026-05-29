@@ -29,7 +29,7 @@ import { resolveAdtLsPath } from '../adt-ls/discovery.js';
 import { AdtLsDriver } from '../adt-ls/driver.js';
 import { AdtLsMcpClient, type McpTool } from '../adt-ls/mcp-federation.js';
 import { setMcpDestination, startMcpServer, stopMcpServer } from '../adt-ls/mcp-lifecycle.js';
-import { type SearchReference, getInactiveObjects, quickSearch } from '../adt-ls/repository.js';
+import { type SearchReference, type UserRef, getInactiveObjects, getUsers, quickSearch } from '../adt-ls/repository.js';
 import { type TlsReverseProxy, startTlsReverseProxy } from '../adt-ls/tls-reverse-proxy.js';
 import { type ConnectivityBridge, startConnectivityBridge } from '../btp/bridge.js';
 import { createConnectivityProxy } from '../btp/connectivity.js';
@@ -54,6 +54,8 @@ export interface Engine {
   search(pattern: string, opts?: { maxResults?: number; types?: string[] }): Promise<SearchReference[]>;
   /** Inactive (draft) objects on the connected destination (LSP). */
   listInactiveObjects(): Promise<unknown[]>;
+  /** System users on the connected destination (LSP). */
+  listUsers(): Promise<UserRef[]>;
   /** The destination logged on at startup, if any. */
   connectedDestination?: string;
   dispose(): Promise<void>;
@@ -161,6 +163,10 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     listInactiveObjects: async () => {
       if (!connectedDestination) throw new Error('No ABAP destination is connected.');
       return getInactiveObjects(driver, connectedDestination);
+    },
+    listUsers: async () => {
+      if (!connectedDestination) throw new Error('No ABAP destination is connected.');
+      return getUsers(driver, connectedDestination);
     },
     dispose: async () => {
       await stopMcpServer(driver).catch(() => {});

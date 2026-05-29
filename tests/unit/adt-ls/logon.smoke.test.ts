@@ -56,6 +56,14 @@ describe('engine headless logon (needs adt-ls + ARC1_TEST_SAP_PASSWORD)', () => 
 
       // list_inactive_objects works (array; may be empty).
       expect(Array.isArray(await engine.listInactiveObjects())).toBe(true);
+
+      // list_users returns the system users (DEVELOPER is on a4h).
+      const users = await engine.listUsers();
+      expect(users.some((u) => u.id?.toUpperCase() === 'DEVELOPER')).toBe(true);
+
+      // list_generators (federated) returns ≥1 generator.
+      const gens = await engine.callTool('abap_generators-list_generators', { destination: 'A4H' });
+      expect(JSON.stringify(gens)).toContain('generators');
     },
     120000,
   );

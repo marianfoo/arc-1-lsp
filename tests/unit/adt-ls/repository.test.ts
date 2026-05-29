@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AdtLsDriver } from '../../../src/adt-ls/driver.js';
-import { getInactiveObjects, quickSearch } from '../../../src/adt-ls/repository.js';
+import { getInactiveObjects, getUsers, quickSearch } from '../../../src/adt-ls/repository.js';
 
 function fakeDriver(reply: unknown) {
   const calls: Array<{ method: string; params: unknown }> = [];
@@ -36,5 +36,19 @@ describe('getInactiveObjects', () => {
     const { driver, calls } = fakeDriver([]);
     await getInactiveObjects(driver, 'A4H');
     expect(calls[0]).toEqual({ method: 'adtLs/activation/getInactiveObjects', params: { destinationId: 'A4H' } });
+  });
+});
+
+describe('getUsers', () => {
+  it('sends {destination} and unwraps .users', async () => {
+    const { driver, calls } = fakeDriver({ users: [{ id: 'DEVELOPER', text: 'John Doe' }] });
+    const users = await getUsers(driver, 'A4H');
+    expect(calls[0]).toEqual({ method: 'adtLs/repository/getUsers', params: { destination: 'A4H' } });
+    expect(users).toEqual([{ id: 'DEVELOPER', text: 'John Doe' }]);
+  });
+
+  it('returns [] when the response has no users', async () => {
+    const { driver } = fakeDriver({});
+    expect(await getUsers(driver, 'A4H')).toEqual([]);
   });
 });
