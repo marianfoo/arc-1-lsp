@@ -127,24 +127,36 @@ export function createMcpServer(engine: Engine): McpServer {
     'get_generator_schema',
     {
       description:
-        'Get the input schema for a specific object generator (use `generatorId` from list_generators). Read-only.',
+        'Get the input schema for a specific object generator (use `generatorId` from list_generators). Read-only. ' +
+        'Object-referencing generators (e.g. OData UI / Web-API service) also need `referencedObjectType` + `referencedObjectName`.',
       inputSchema: {
-        generatorId: z.string().describe('Generator id from list_generators.'),
+        generatorId: z.string().describe('Generator id from list_generators (e.g. "x-ui-service").'),
         package: z
           .string()
           .optional()
           .describe('Target package the schema is contextualized for (adt-ls requires one; default "$TMP").'),
+        referencedObjectType: z
+          .string()
+          .optional()
+          .describe('For generators built from an object: the referenced object type ("TABL", "DDLS", "BDEF", …).'),
+        referencedObjectName: z
+          .string()
+          .optional()
+          .describe('For generators built from an object: the referenced object name (e.g. "SCARR").'),
       },
     },
-    async ({ generatorId, package: pkg }) => {
+    async ({ generatorId, package: pkg, referencedObjectType, referencedObjectName }) => {
       const dest = engine.connectedDestination;
       if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
-      // adt-ls's get_schema requires a packageName (errors "packageName is missing or empty" without it).
+      // adt-ls's get_schema requires all of packageName + referencedObjectType + referencedObjectName
+      // (the latter two may be ""); object-referencing generators (UI / Web-API service) need a real reference.
       return text(
         await engine.callTool('abap_generators-get_schema', {
           destination: dest,
           generatorId,
           packageName: pkg ?? '$TMP',
+          referencedObjectType: referencedObjectType ?? '',
+          referencedObjectName: referencedObjectName ?? '',
         }),
       );
     },

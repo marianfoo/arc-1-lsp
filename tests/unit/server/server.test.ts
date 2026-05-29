@@ -176,11 +176,18 @@ describe('createMcpServer', () => {
     await client.callTool({ name: 'get_generator_schema', arguments: { generatorId: 'odata_ui' } });
     expect(got).toEqual({
       name: 'abap_generators-get_schema',
-      args: { destination: 'A4H', generatorId: 'odata_ui', packageName: '$TMP' },
+      // all 5 args are required by adt-ls; refs default to "" (object-less generators)
+      args: {
+        destination: 'A4H',
+        generatorId: 'odata_ui',
+        packageName: '$TMP',
+        referencedObjectType: '',
+        referencedObjectName: '',
+      },
     });
   });
 
-  it('get_generator_schema forwards an explicit package as packageName', async () => {
+  it('get_generator_schema forwards explicit package + referenced object', async () => {
     let got: { args?: Record<string, unknown> } = {};
     const client = await linkedClient(
       fakeEngine({
@@ -191,8 +198,22 @@ describe('createMcpServer', () => {
         },
       }),
     );
-    await client.callTool({ name: 'get_generator_schema', arguments: { generatorId: 'odata_ui', package: 'ZFOO' } });
-    expect(got.args).toEqual({ destination: 'A4H', generatorId: 'odata_ui', packageName: 'ZFOO' });
+    await client.callTool({
+      name: 'get_generator_schema',
+      arguments: {
+        generatorId: 'x-ui-service',
+        package: 'ZFOO',
+        referencedObjectType: 'TABL',
+        referencedObjectName: 'SCARR',
+      },
+    });
+    expect(got.args).toEqual({
+      destination: 'A4H',
+      generatorId: 'x-ui-service',
+      packageName: 'ZFOO',
+      referencedObjectType: 'TABL',
+      referencedObjectName: 'SCARR',
+    });
   });
 
   it('get_object_type_details passes objectType + default name placeholder', async () => {
