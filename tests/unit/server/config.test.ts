@@ -31,6 +31,11 @@ describe('loadConfig (precedence: CLI > env > default)', () => {
     expect(c.transport).toBe('stdio');
   });
 
+  it('falls back to CF $PORT when ARC1_PORT is unset (ARC1_PORT still wins)', () => {
+    expect(loadConfig([], { PORT: '12345' }).httpPort).toBe(12345);
+    expect(loadConfig([], { ARC1_PORT: '7777', PORT: '12345' }).httpPort).toBe(7777);
+  });
+
   it('rejects an invalid transport', () => {
     expect(() => loadConfig([], { ARC1_TRANSPORT: 'ftp' })).toThrow(/Invalid transport/);
   });

@@ -1,0 +1,17 @@
+# BTP Cloud Foundry manifest for arc-1-lsp (no secrets — ARC1_API_KEYS is set via
+# `cf set-env`). Image is the public/BYO-built linux/amd64 container on ghcr.
+applications:
+  - name: arc-1-lsp
+    docker:
+      image: ghcr.io/marianfoo/arc-1-lsp:0.0.1
+      username: marianfoo # pull creds via CF_DOCKER_PASSWORD until the package is public
+    memory: 2G
+    disk_quota: 2G
+    instances: 1
+    health-check-type: http
+    health-check-http-endpoint: /healthz
+    health-check-invocation-timeout: 30
+    timeout: 180 # adt-ls (JVM/Eclipse) cold start before the http server binds
+    env:
+      ARC1_TRANSPORT: http-streamable
+      ARC1_LOG_LEVEL: info

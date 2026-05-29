@@ -33,7 +33,8 @@ export function loadConfig(
     throw new Error(`Invalid transport "${transport}" (expected stdio | http-streamable)`);
   }
   const port = flag(argv, 'adt-ls-mcp-port') ?? env.ARC1_ADT_LS_MCP_PORT;
-  const httpPort = flag(argv, 'port') ?? env.ARC1_PORT;
+  // CF assigns $PORT at runtime — honor it (after explicit flag/ARC1_PORT).
+  const httpPort = flag(argv, 'port') ?? env.ARC1_PORT ?? env.PORT;
   return {
     adtLsPath: flag(argv, 'adt-ls-path') ?? env.ARC1_ADT_LS_PATH,
     adtLsMcpPort: port ? Number(port) : 2240,

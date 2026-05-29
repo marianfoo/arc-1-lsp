@@ -27,11 +27,13 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
 # Host-built output + the BYO adt-ls (run `npm run build` + extract-adt-ls.mjs first).
-COPY dist ./dist
+# adt-ls (big, stable) before dist (small, changes often) for layer-cache reuse.
 COPY vendor/adt-ls ./vendor/adt-ls
+COPY dist ./dist
 
+# Do NOT bake ARC1_PORT: on CF the app must listen on the assigned $PORT.
+# Locally, config falls back to 8080 (matches EXPOSE) when neither is set.
 ENV ARC1_TRANSPORT=http-streamable \
-    ARC1_PORT=8080 \
     ARC1_ADT_LS_PATH=/app/vendor/adt-ls/linux/gtk/x86_64/adt-ls
 
 EXPOSE 8080

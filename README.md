@@ -68,6 +68,23 @@ docker run -e ARC1_API_KEYS=devkey -p 8080:8080 arc-1-lsp:dev
 | `ARC1_PORT` / `--port` | `8080` | HTTP port (http-streamable) |
 | `ARC1_LOG_LEVEL` | `info` | `debug`\|`info`\|`warn`\|`error` (stderr only) |
 
+## Deploy to BTP Cloud Foundry
+
+The image deploys to CF as a docker app (see `manifest.yml`). Secrets stay out of
+git — the API key and the registry pull token are passed at deploy time:
+
+```bash
+docker push ghcr.io/marianfoo/arc-1-lsp:0.0.1
+CF_DOCKER_PASSWORD=$(gh auth token) cf push -f manifest.yml --no-start
+cf set-env arc-1-lsp ARC1_API_KEYS "$(openssl rand -hex 16)"
+CF_DOCKER_PASSWORD=$(gh auth token) cf start arc-1-lsp
+```
+
+Live (us10 free-tier): `https://arc-1-lsp.cfapps.us10-001.hana.ondemand.com`
+— `/healthz` (200), `/mcp` (API-key gated). `health` confirms the embedded
+adt-ls is up. `list_destinations` is empty until a destination is bound — the
+Cloud-Connector bridge for a4h is the next milestone.
+
 ## Status & roadmap
 
 Foundation (this milestone) is **green**: spawn adt-ls headless → start its MCP
