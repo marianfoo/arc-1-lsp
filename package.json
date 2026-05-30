@@ -2,9 +2,39 @@
   "name": "arc-1-lsp",
   "version": "0.0.1",
   "description": "ARC-1 edition that delegates all ABAP/ADT work to SAP's embedded adt-ls language server.",
+  "keywords": [
+    "sap",
+    "abap",
+    "adt",
+    "adt-ls",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "llm",
+    "ai",
+    "btp"
+  ],
+  "license": "MIT",
+  "author": "Marian Zeis",
+  "homepage": "https://github.com/marianfoo/arc-1-lsp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marianfoo/arc-1-lsp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/marianfoo/arc-1-lsp/issues"
+  },
   "type": "module",
   "bin": {
     "arc1-lsp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=22"

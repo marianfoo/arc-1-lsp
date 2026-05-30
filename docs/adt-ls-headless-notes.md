@@ -120,12 +120,15 @@ never pollute the user's store or reuse stale entries.
 - Federated MCP backend calls work once connected, e.g.
   `abap_creation-get_all_creatable_objects {destination:"A4H"}` returned real
   rows (`{"creatableObjects":[{"name":"ABAP Class","objectType":"CLAS/OC"},…]}`).
-- **adt-ls's MCP has NO read-source/search tool** (the 14 tools are creation /
-  activation / unit-tests / transport / generators / business-services). So
-  `read_source` (SAPRead) MUST use LSP `adtLs/fileSystem/readFile`. The URI form
-  `adt://<DEST>/sap/bc/adt/oo/classes/<name>/source/main` is accepted; the exact
-  response shape still needs nailing during implementation (a bare `{}` came back
-  — likely needs a stat/open first or a different result field).
+- **adt-ls's MCP has NO read-source tool** (its tools are creation / activation /
+  unit-tests / transport / generators / business-services). So `read_source`
+  (SAPRead) uses LSP `adtLs/fileSystem/readFile`.
+  > **SOLVED — superseded by [`adt-ls-reference.md`](adt-ls-reference.md) §1.** The
+  > working URI is the canonical **single-slash repotree/AFF** form
+  > `abap:/repotree-v1/<dest>/…/<obj>.clas.abap` (resolved from a search hit via
+  > `adtLs/repository/getLsUri`). The `adt://<dest>/…/source/main` shape this note
+  > originally tried returns `{}` — that was the *wrong URI shape*, not a headless
+  > limitation. `read_source` + the full create→edit→activate→test→delete loop work.
 
 ### MCP start quirk
 `adtLs/mcp/startMCPServer` rejects `port:0` (*"Port must be between 1024 and
