@@ -114,3 +114,16 @@ Installed reference at time of writing: `sapse.adt-vscode` **1.0.0**, adt-ls
   share the space.
 - `cf push -f manifest.yml` shows a manifest diff but preserves `cf set-env` vars
   not listed in the manifest (verified). Keep secrets in `cf set-env`, not the manifest.
+- **CF topology (recon 2026-06-01) — matters for CC mode:** there are TWO orgs.
+  arc-1-lsp runs in `Marian Zeis_dev-9li7mzug` / `abap-dev`, whose services are
+  `arc1-301-dest` (destination), `arc1-301-xsuaa`, and `abap-free` (a BTP ABAP
+  env) — **no `connectivity` service**. The `connectivity` service + Cloud
+  Connector live only in the OTHER org `Marian_Zeis_joule2-7lrbs13d` / `dev`
+  (`arc1-connectivity` + `arc1-destination`, bound to the main arc-1 apps
+  `arc1-mcp-*`). So **CC-mode deploy of arc-1-lsp first needs a `connectivity`
+  instance provisioned (+ a CC→backend HTTP virtual host + a destination) in its
+  space** — see `docs/cc-mode-deploy.md`. a4h being internet-reachable is why
+  DIRECT mode was used and CC was never wired for arc-1-lsp.
+- **Deploy needs Docker:** `cf push` uses the pre-built `ghcr` image; a new build
+  (e.g. to ship new tools) needs a running Docker daemon to build `linux/amd64`
+  (`scripts/docker-build.sh`) — there's no buildpack path (adt-ls + native libs).

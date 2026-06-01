@@ -1,0 +1,36 @@
+# BTP Cloud Foundry manifest for arc-1-lsp in CLOUD-CONNECTOR mode — reaches an
+# on-prem SAP system through the BTP Connectivity service + Cloud Connector
+# (vs the DIRECT internet path in manifest.yml). Full runbook: docs/cc-mode-deploy.md.
+#
+# Prereqs: a Cloud Connector exposing the backend as an HTTP virtual host, and a
+# `connectivity` + `destination` service in the target space. Adjust the service
+# names below to your actual instances (`cf services`).
+applications:
+  - name: arc-1-lsp
+    docker:
+      image: ghcr.io/marianfoo/arc-1-lsp:0.0.1
+      username: marianfoo # pull creds via CF_DOCKER_PASSWORD until the ghcr package is public
+    memory: 2G
+    disk_quota: 2G
+    instances: 1
+    health-check-type: http
+    health-check-http-endpoint: /healthz
+    health-check-invocation-timeout: 30
+    timeout: 180 # adt-ls (JVM/Eclipse) cold start before the http server binds
+    services:
+      - arc1-connectivity # BTP Connectivity — the Cloud Connector tunnel (provides onpremise_proxy_host)
+      - arc1-destination # BTP Destination service — resolves the destination → on-prem URL + creds
+    env:
+      ARC1_TRANSPORT: http-streamable
+      ARC1_LOG_LEVEL: info
+    # CC mode is selected purely by env (set via `cf set-env`; secrets never committed):
+    #   cf set-env   arc-1-lsp ARC1_SAP_DESTINATION SAP_TRIAL   # the BTP destination name (→ a4h via CC)
+    #   cf unset-env arc-1-lsp ARC1_SAP_HOST                    # clear the DIRECT vars so they don't win
+    #   cf unset-env arc-1-lsp ARC1_SAP_PORT
+    #   cf unset-env arc-1-lsp ARC1_SAP_USER
+    #   cf unset-env arc-1-lsp ARC1_SAP_PASSWORD
+    #   cf set-env   arc-1-lsp ARC1_API_KEYS <key>[:label]      # edge auth
+    # The destination (e.g. SAP_TRIAL) supplies the URL (CC virtual host, HTTP),
+    # basic creds, and CloudConnectorLocationId. `planConnection` then picks
+    # connectivity mode automatically. Re-push tip: `cf stop arc-1-lsp` first if
+    # the org memory quota is tight.
