@@ -1,6 +1,6 @@
 {
   "name": "arc-1-lsp",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "ARC-1 edition that delegates all ABAP/ADT work to SAP's embedded adt-ls language server.",
   "keywords": [
     "sap",
