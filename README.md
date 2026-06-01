@@ -17,9 +17,15 @@ owns CSRF, locking, XML, activation, transport — everything system-specific.
 `adt-ls` is **SAP's** language server: the headless core of the Eclipse-based
 **ABAP Development Tools (ADT)**, shipped inside the official
 [**ABAP Development Tools for VS Code**](https://marketplace.visualstudio.com/items?itemName=SAPSE.adt-vscode)
-extension (`sapse.adt-vscode`). It speaks a private LSP namespace (`adtLs/*` —
-destinations, logon, filesystem, activation, transport, unit tests) and embeds an
-**experimental MCP server** (object creation, activation, generators, …).
+extension (`sapse.adt-vscode`). It exposes **three** surfaces, and arc-1-lsp drives
+all of them:
+1. **standard LSP code-intelligence** (`textDocument/*` — document symbols, go-to-
+   definition, references/where-used, type hierarchy, diagnostics/syntax check,
+   completion) — it *is* a language server;
+2. a **private LSP namespace** (`adtLs/*` — destinations, logon, filesystem,
+   activation, transport, unit tests);
+3. an embedded **experimental MCP server** (object creation, activation, RAP
+   generators, transports, …).
 
 arc-1-lsp does not reimplement any of that — it **discovers, spawns, and drives**
 the developer-provided `adt-ls` headless (no Eclipse, no VS Code, no browser). The
@@ -38,14 +44,16 @@ Both are MCP servers for SAP ABAP and share the same tool shape. They differ in
 | System-specific code to maintain | ~29 ADT modules | ~zero (it's SAP's job) |
 | Object-type coverage | **All** — classic *and* modern (programs, tables, function groups, domains, CDS, classes, RAP, …) | **Modern ABAP-Cloud types only** (class, interface, CDS, behavior def, service def/binding, …) |
 | Free SQL / data preview | ✅ | ❌ (absent in adt-ls) |
-| Navigation / where-used, ATC/lint | ✅ | ❌ (not reachable headless) |
+| Navigation / where-used / type hierarchy | ✅ | ✅ (via adt-ls's standard LSP — `textDocument/*`) |
+| Syntax check / ATC | ✅ | ◐ syntax check ✅ (`check_syntax`); ATC deep checks ❌ |
 | Git (gCTS / abapGit) | ✅ | ❌ (absent in adt-ls) |
 | Maturity | Production, multi-user, write-capable | Working; reads + authoring loop; single technical user |
 
-**Use main ARC-1** for the broadest coverage (classic objects, SQL, ATC, git,
-where-used) and production multi-user deployments. **Use arc-1-lsp** when you want
+**Use main ARC-1** for the broadest coverage (classic objects, free SQL, ATC deep
+checks, git) and production multi-user deployments. **Use arc-1-lsp** when you want
 SAP itself to own the ADT protocol — less code to maintain, and behavior that
-tracks ADT exactly — and your work is on modern ABAP-Cloud objects.
+tracks ADT exactly (including its standard LSP code-intelligence) — and your work
+is on modern ABAP-Cloud objects.
 
 The honest, line-by-line map of what is and isn't wired (and *why*) lives in
 [`docs/arc-1-feature-parity.md`](docs/arc-1-feature-parity.md); the live-verified
@@ -248,7 +256,7 @@ The image deploys to CF as a docker app (see `manifest.yml`). Secrets stay out o
 git — the API key, SAP creds, and the registry pull token are passed at deploy time:
 
 ```bash
-docker push ghcr.io/<owner>/arc-1-lsp:0.0.1
+docker push ghcr.io/<owner>/arc-1-lsp:0.1.0
 # secrets via cf set-env (never committed):
 cf set-env arc-1-lsp ARC1_API_KEYS "$(openssl rand -hex 16)"
 cf set-env arc-1-lsp ARC1_SAP_HOST   <host>
