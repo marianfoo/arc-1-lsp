@@ -69,7 +69,9 @@ silent empty result. **Don't hand-build URIs — use the one `getLsUri`/`create`
 | Service info | MCP `abap_business_services-fetch_service_information` (7 args from fetch_services output) | ✅ | wired `get_service_details` — OData URL/entity-sets for one service |
 | **LSP code-intelligence** | LSP `textDocument/*` (didOpen → query → didClose) | ✅ | **§9 — CORRECTED.** documentSymbol / definition / declaration / references / prepareTypeHierarchy(+supertypes/subtypes) / diagnostic / completion all work headless. Earlier "hangs" was sending `didOpen` as a *request*; it's a **notification** (driver now has `sendNotification`). |
 | **Syntax check (pull)** | LSP `textDocument/diagnostic` | ✅ | §9 — the ABAP syntax check ADT runs, WITHOUT activating; `{kind:'full',items:[…]}`. (Distinct from `atc/runCheck` ATC, still unreached.) |
-| ATC (deep checks) | LSP `atc/runCheck` | ❌ | "Object to be checked could not be determined" for every param shape. Unreached (≠ the syntax-check diagnostic above, which works). |
+| ATC (deep checks) | LSP `adtLs/atc/runCheck` | ❌ | **Re-probed 2026-06-01.** The real method is `adtLs/atc/runCheck` (`atc/runCheck` → "unsupported"). `objectUri` is the **accepted key** (other keys → "object could not be determined"; `objectUri` → past that), but it returns **"Internal error" for every check variant tried** (`ABAP_CLOUD_DEVELOPMENT_DEFAULT`/`DEFAULT`/`ABAP_CLOUD_READINESS`/…), on both the ADT-path and repotree URI. Not functional headless in `1.0.0.202605281240` — ask SAP (like hover). The syntax-check `textDocument/diagnostic` above DOES work + covers basic checks. |
+| Formatting / pretty-print | LSP `textDocument/formatting` | ❌ | capability is `false`; the method returns `[]` (no-op). No `adtLs/*` pretty-print under the obvious names. |
+| Revision history | — | ❌ | no `adtLs/repository/getRevisions`/`getVersions` (probed — "unsupported"). |
 | Free SQL / data preview | — | ❌ | no such method |
 | Git (gCTS/abapGit) | — | ❌ | not exposed |
 
