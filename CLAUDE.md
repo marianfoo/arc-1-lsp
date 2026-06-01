@@ -84,6 +84,8 @@ src/
 │   ├── destination.ts       # lookupDestination (fixed-user; PP is plan 05)
 │   ├── bridge.ts            # local HTTP forward proxy → BTP Connectivity (standard proxy, NOT CONNECT)
 │   └── types.ts             # BTPConfig / Destination / BTPProxyConfig
+├── authz/
+│   └── policy.ts            # scope model (ADR-0007): Scope, expandScopes, TOOL_SCOPES, profiles, hasToolAccess
 └── server/
     ├── config.ts            # loadConfig (CLI > env > default); SapTargetConfig + allowWrites/allowTransportWrites/allowedPackages
     ├── safety.ts            # write-safety: assertWriteAllowed (+requireTransportWrites) + isPackageAllowed

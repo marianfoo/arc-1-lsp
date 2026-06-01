@@ -32,6 +32,13 @@ Installed reference at time of writing: `sapse.adt-vscode` **1.0.0**, adt-ls
   per-request identity → PP simplifies dramatically (no pool, no proxy injection).
 - **Reference:** main ARC-1's `src/adt/btp.ts` `lookupDestinationWithUserToken`
   (SAP Cloud SDK + jwt-bearer fallback); our `src/btp/*` ports the fixed-user half.
+- **Status (ADR-0007 / plan 10):** designed + staged. **Stage 1 — the
+  authorization scope model (`src/authz/policy.ts`) + API-key profiles + the
+  `xs-security.json` descriptor — is implemented** (dep-free, unit-tested). Stage 2
+  (XSUAA JWT edge → map scopes → enforce per-tool) and Stage 3 (the per-user adt-ls
+  **session pool** + jwt-bearer exchange) are NOT landed — they add heavy deps
+  (`@sap/xssec`, `jose`, `@sap-cloud-sdk/connectivity`) and need a bound XSUAA +
+  ≥2 real SAP users to verify (currently blocked, like the CC deploy in plan 09).
 
 ## 3. BTP Connectivity / Cloud Connector
 - **Current:** adt-ls doesn't speak BTP Connectivity; we run a local forward proxy

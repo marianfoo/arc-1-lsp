@@ -1,0 +1,43 @@
+{
+  "xsappname": "arc-1-lsp",
+  "tenant-mode": "dedicated",
+  "description": "arc-1-lsp — MCP server for ABAP development via SAP adt-ls",
+  "scopes": [
+    { "name": "$XSAPPNAME.read", "description": "Read ABAP objects, metadata, search, validation" },
+    { "name": "$XSAPPNAME.write", "description": "Create/update/activate/delete/generate ABAP objects" },
+    { "name": "$XSAPPNAME.transport", "description": "Create CTS transport requests" },
+    { "name": "$XSAPPNAME.admin", "description": "Full access" }
+  ],
+  "attributes": [],
+  "role-templates": [
+    {
+      "name": "Viewer",
+      "description": "Read-only access to ABAP objects and metadata",
+      "scope-references": ["$XSAPPNAME.read"]
+    },
+    {
+      "name": "Developer",
+      "description": "Read + author objects (create/update/activate/delete/generate)",
+      "scope-references": ["$XSAPPNAME.read", "$XSAPPNAME.write"]
+    },
+    {
+      "name": "Admin",
+      "description": "Full access including CTS transport creation",
+      "scope-references": ["$XSAPPNAME.read", "$XSAPPNAME.write", "$XSAPPNAME.transport", "$XSAPPNAME.admin"]
+    }
+  ],
+  "role-collections": [
+    { "name": "ARC1LSP_Viewer", "description": "arc-1-lsp viewer", "role-template-references": ["$XSAPPNAME.Viewer"] },
+    {
+      "name": "ARC1LSP_Developer",
+      "description": "arc-1-lsp developer",
+      "role-template-references": ["$XSAPPNAME.Developer"]
+    },
+    { "name": "ARC1LSP_Admin", "description": "arc-1-lsp admin", "role-template-references": ["$XSAPPNAME.Admin"] }
+  ],
+  "oauth2-configuration": {
+    "token-validity": 3600,
+    "refresh-token-validity": 86400,
+    "redirect-uris": ["http://localhost:*/**", "https://*.cfapps.us10-001.hana.ondemand.com/**"]
+  }
+}

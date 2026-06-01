@@ -217,7 +217,7 @@ process instead of a URL. GUI inspector: `npx @modelcontextprotocol/inspector`.
 | `ARC1_ADT_LS_MCP_TOKEN` / `--adt-ls-mcp-token` | (generated) | bearer for `adt-ls`'s MCP server |
 | `ARC1_TRANSPORT` / `--transport` | `stdio` | `stdio` \| `http-streamable` |
 | `ARC1_PORT` / `--port` | `8080` | HTTP port (http-streamable; CF `$PORT` honored) |
-| `ARC1_API_KEYS` / `--api-keys` | (none) | edge auth: `key[:label][,key2…]`; empty disables auth (local only) |
+| `ARC1_API_KEYS` / `--api-keys` | (none) | edge auth: `key[:label-or-profile][,key2…]`; empty disables auth (local only). A profile suffix `:viewer`/`:developer`/`:admin` assigns scopes (per-tool enforcement arrives with the XSUAA edge — see [ADR-0007](docs/adr/0007-enterprise-auth-scopes-xsuaa-pp.md)); any other suffix is a free label (defaults to `developer`) |
 | `ARC1_ALLOW_WRITES` / `--allow-writes` | `false` | enable mutating tools (create/update/activate/delete/generate) |
 | `ARC1_ALLOW_TRANSPORT_WRITES` / `--allow-transport-writes` | `false` | enable CTS transport creation (`create_transport`) — also requires `ARC1_ALLOW_WRITES` |
 | `ARC1_ALLOWED_PACKAGES` / `--allowed-packages` | `$TMP` | packages writes may target — exact / `PREFIX*` / `*` |
