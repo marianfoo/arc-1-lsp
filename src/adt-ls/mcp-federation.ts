@@ -4,6 +4,7 @@
  * adding its own auth/scope/governance in front. Parses SSE-framed responses.
  */
 import { logger } from '../server/logger.js';
+import { VERSION } from '../version.js';
 
 export interface McpTool {
   name: string;
@@ -55,7 +56,7 @@ export class AdtLsMcpClient {
       jsonrpc: '2.0',
       id: 1,
       method: 'initialize',
-      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'arc-1-lsp', version: '0.0.1' } },
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'arc-1-lsp', version: VERSION } },
     });
     if (init.status !== 200 || !init.sessionId) {
       throw new Error(`adt-ls MCP initialize failed: HTTP ${init.status}`);

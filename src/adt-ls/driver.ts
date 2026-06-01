@@ -20,6 +20,7 @@ import {
   createMessageConnection,
 } from 'vscode-jsonrpc/node.js';
 import { logger } from '../server/logger.js';
+import { VERSION } from '../version.js';
 
 export interface AdtLsInitializeResult {
   serverInfo?: { name: string; version: string };
@@ -149,7 +150,7 @@ export class AdtLsDriver implements LspRequester {
 
     const result = (await this.conn.sendRequest('initialize', {
       processId: process.pid,
-      clientInfo: { name: 'arc-1-lsp', version: '0.0.1' },
+      clientInfo: { name: 'arc-1-lsp', version: VERSION },
       rootUri: null,
       workspaceFolders: null,
       capabilities: {},
@@ -157,7 +158,7 @@ export class AdtLsDriver implements LspRequester {
       // User-Agent from initializationOptions.userAgentInfos; if absent, its
       // static initializer NPEs and every HTTP destination operation fails with
       // "Could not initialize class …HttpRequestHeaderUtil". (Verified 2026-05-29.)
-      initializationOptions: { userAgentInfos: [{ name: 'arc-1-lsp', version: '0.0.1' }] },
+      initializationOptions: { userAgentInfos: [{ name: 'arc-1-lsp', version: VERSION }] },
     })) as AdtLsInitializeResult;
     this.conn.sendNotification('initialized', {});
     this.initializeResult = result;

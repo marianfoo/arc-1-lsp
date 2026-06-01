@@ -121,6 +121,12 @@ emulation (no browser). Full recipe + decisions:
    deps: `openssl` + `keytool` (the latter ships inside `adt-ls`'s JRE). See
    [`docs/native-deps.md`](docs/native-deps.md).
 
+> **Compatibility:** arc-1-lsp drives `adt-ls`'s private `adtLs/*` protocol, which
+> can change between releases. This build is verified against `sapse.adt-vscode`
+> **1.0.0** / adt-ls **1.0.0.202605281240**; on a different version arc-1-lsp logs
+> a startup warning and you should re-verify against
+> [`docs/adt-ls-reference.md`](docs/adt-ls-reference.md).
+
 ## Install & run
 
 ### From source (stdio)
@@ -279,8 +285,10 @@ ARC1_URL=https://<host>/mcp ARC1_KEY=<api-key> bash scripts/smoke-remote.sh
 | [`docs/native-deps.md`](docs/native-deps.md) | System libraries `adt-ls` needs in a slim container |
 | [`docs/journey.md`](docs/journey.md) | The chronological story, including dead-ends (so they aren't re-walked) |
 
-Working on the code with Claude Code? [`CLAUDE.md`](CLAUDE.md) is the contributor
-guide (design principles, codebase map, conventions).
+Contributing? See [`CONTRIBUTING.md`](CONTRIBUTING.md) (setup, tests, conventions)
+and [`SECURITY.md`](SECURITY.md) (reporting vulnerabilities). Working with Claude
+Code? [`CLAUDE.md`](CLAUDE.md) is the design + codebase map. Releases are
+automated from Conventional Commits via release-please.
 
 ## Status & roadmap
 

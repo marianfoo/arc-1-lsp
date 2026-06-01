@@ -38,6 +38,7 @@ import { createConnectivityProxy } from '../btp/connectivity.js';
 import { lookupDestination } from '../btp/destination.js';
 import type { BTPConfig } from '../btp/types.js';
 import { parseVCAPServices } from '../btp/vcap.js';
+import { warnOnAdtLsVersionMismatch } from '../version.js';
 import type { Arc1LspConfig, SapTargetConfig } from './config.js';
 import { logger } from './logger.js';
 
@@ -117,6 +118,7 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
 
   const driver = new AdtLsDriver(bin, driverOpts);
   const init = await driver.start();
+  warnOnAdtLsVersionMismatch(init.serverInfo?.version, (m) => logger.warn(`engine: ${m}`));
 
   const token = config.adtLsMcpToken || crypto.randomBytes(24).toString('hex');
   const started = await startMcpServer(driver, { port: config.adtLsMcpPort, token });

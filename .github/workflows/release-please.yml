@@ -1,0 +1,25 @@
+name: release-please
+
+# Maintains a Release PR from Conventional Commits and, on merge, bumps the
+# version (package.json + src/version.ts) and cuts the git tag + GitHub Release.
+# It does NOT publish to npm or ghcr — those stay manual until trusted publishing
+# (npm OIDC) is configured. To enable PR creation, the repo must allow
+# "Allow GitHub Actions to create and approve pull requests"
+# (Settings → Actions → General → Workflow permissions).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

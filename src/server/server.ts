@@ -6,6 +6,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { VERSION } from '../version.js';
 import type { Engine } from './engine.js';
 
 function text(value: unknown) {
@@ -15,7 +16,7 @@ function text(value: unknown) {
 }
 
 export function createMcpServer(engine: Engine): McpServer {
-  const server = new McpServer({ name: 'arc-1-lsp', version: '0.0.1' });
+  const server = new McpServer({ name: 'arc-1-lsp', version: VERSION });
 
   server.registerTool(
     'health',
