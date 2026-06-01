@@ -6,3 +6,5 @@ vendor/
 .arc1-cache.db
 .DS_Store
 .cursor/
+# Internal BTP/CF setup notes (orgs, spaces, destinations, users) — never committed
+docs/internal-setup.md

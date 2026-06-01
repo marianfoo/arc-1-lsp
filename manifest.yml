@@ -3,7 +3,7 @@
 applications:
   - name: arc-1-lsp
     docker:
-      image: ghcr.io/marianfoo/arc-1-lsp:0.0.1
+      image: ghcr.io/marianfoo/arc-1-lsp:latest # dev instance tracks latest; a future release CI pins :X.Y.Z
       username: marianfoo # pull creds via CF_DOCKER_PASSWORD until the package is public
     memory: 2G
     disk_quota: 2G

@@ -73,6 +73,14 @@ Installed reference at time of writing: `sapse.adt-vscode` **1.0.0**, adt-ls
 - **If SAP** matures/ships this → we federate more directly; fewer custom tools
   needed. Watch the tool list per release (`docs` in main arc-1:
   `docs/research/sapse-adt-vscode-mcp.md` has the teardown).
+- **⚠ LSP code-intelligence (`adt_lsp_*`) — likely SAP duplication.** SAP's own
+  prototype (Thomas Ritter) already exposes the standard `textDocument/*` methods
+  as MCP tools named `adt_lsp_document_symbols`/`_go_to_definition`/`_find_references`/
+  `_hover`/`_type_hierarchy`/`_diagnostics`. Our `src/adt-ls/navigation.ts` (plan 11)
+  is the **bridge until SAP ships theirs**. **If `adt_lsp_*` appears in adt-ls's MCP
+  `tools/list`, FEDERATE SAP's tools and retire our navigation proxy** (esp. `hover`,
+  which works in SAP's prototype but returns null in our headless flow). Re-check
+  per adt-ls release; raise with SAP before investing further in the proxy.
 
 ## 6. The private LSP protocol (`adt-ls-client-protocol`)
 - **Current:** **unpublished** (npm 404). We reverse-engineered the requests we
