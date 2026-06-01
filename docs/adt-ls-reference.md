@@ -208,7 +208,7 @@ workspaceSymbol are **absent**.
 | `textDocument/diagnostic` | ✅ | `{kind:'full',items:[…]}` — the **ABAP syntax check ADT runs, without activating**. Empty items = clean. Pull-model (no position). |
 | `textDocument/completion` | ✅ | `CompletionList` `{isIncomplete,items:[{label,labelDetails,kind,textEdit,…}]}`. Large (keywords + context). |
 | `textDocument/semanticTokens/full` | ✅ | `{data:[…]}` LSP-encoded token ints + the legend from capabilities. Low LLM value (raw highlighting). |
-| `textDocument/hover` | ◐ | provider advertised but returns **`null`** at every position tried (class name, method, local var, type ref). Effectively non-functional headless — **skip** (revisit per release; Thomas's prototype has it working, so the invocation may differ). |
+| `textDocument/hover` | ◐ | provider advertised but returns **`null`** at EVERY position **exhaustively probed** — declarations (class name, method, local var, type) AND usages (type ref, param, attribute access `->`, method call). Non-functional headless in `1.0.0.202605281240` — **skipped**. SAP's prototype (Thomas) has hover working, so a newer build or a different invocation (e.g. a resolve step) likely differs → revisit per adt-ls release / ask SAP for the exact call. |
 | `textDocument/documentHighlight` | ◐ | returns `[]` even on a used local var. Low value. |
 | `textDocument/codeLens` | ◐ | returns `[]`. Low value headless. |
 
