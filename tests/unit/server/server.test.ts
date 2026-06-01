@@ -26,6 +26,15 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
       findTransport: async () => ({ transports: [] }),
       createTransport: async () => ({ transportRequestNumber: 'A4HK900123' }),
     },
+    lsp: { sendRequest: async () => ({}), sendNotification: async () => {} },
+    navigation: {
+      documentSymbols: async () => [{ name: 'ZCL_X', kind: 5 }],
+      checkSyntax: async () => ({ kind: 'full', items: [] }),
+      goToDefinition: async () => [{ targetUri: 'abap:/x' }],
+      findReferences: async () => [{ uri: 'abap:/x' }],
+      typeHierarchy: async () => ({ item: { name: 'ZCL_X' }, supertypes: [], subtypes: [] }),
+      completion: async () => ({ isIncomplete: false, total: 0, items: [] }),
+    },
     reconnect: async () => true,
     dispose: async () => {},
     ...overrides,
@@ -46,15 +55,20 @@ describe('createMcpServer', () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'activate_object',
+      'check_syntax',
+      'completion',
       'create_object',
       'create_transport',
       'delete_object',
+      'document_symbols',
+      'find_references',
       'find_transport',
       'generate_objects',
       'get_generator_schema',
       'get_object_type_details',
       'get_service_binding',
       'get_service_details',
+      'go_to_definition',
       'health',
       'list_creatable_objects',
       'list_destinations',
@@ -64,6 +78,7 @@ describe('createMcpServer', () => {
       'read_source',
       'run_unit_tests',
       'search_objects',
+      'type_hierarchy',
       'update_source',
       'validate_object',
     ]);
@@ -481,5 +496,67 @@ describe('createMcpServer', () => {
       },
     });
     expect(JSON.stringify(res.content)).toContain('No ABAP destination is connected');
+  });
+
+  it('document_symbols delegates to engine.navigation.documentSymbols', async () => {
+    let got: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        navigation: {
+          ...fakeEngine().navigation,
+          documentSymbols: async (a: unknown) => {
+            got = a;
+            return [{ name: 'ZCL_X', kind: 5 }];
+          },
+        },
+      }),
+    );
+    const res = await client.callTool({
+      name: 'document_symbols',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC' },
+    });
+    expect(got).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC' });
+    expect(JSON.stringify(res.content)).toContain('ZCL_X');
+  });
+
+  it('go_to_definition passes the object ref + locator to navigation', async () => {
+    let got: { ref?: unknown; loc?: unknown } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        navigation: {
+          ...fakeEngine().navigation,
+          goToDefinition: async (ref: unknown, loc: unknown) => {
+            got = { ref, loc };
+            return [{ targetUri: 'abap:/x' }];
+          },
+        },
+      }),
+    );
+    await client.callTool({
+      name: 'go_to_definition',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', symbol: 'RUN' },
+    });
+    expect(got.ref).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC' });
+    expect(got.loc).toEqual({ symbol: 'RUN', line: undefined, character: undefined });
+  });
+
+  it('type_hierarchy forwards the direction option', async () => {
+    let opts: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        navigation: {
+          ...fakeEngine().navigation,
+          typeHierarchy: async (_ref: unknown, _loc: unknown, o: unknown) => {
+            opts = o;
+            return { item: null, supertypes: [], subtypes: [] };
+          },
+        },
+      }),
+    );
+    await client.callTool({
+      name: 'type_hierarchy',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', symbol: 'ZCL_X', direction: 'subtypes' },
+    });
+    expect(opts).toEqual({ direction: 'subtypes' });
   });
 });

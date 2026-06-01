@@ -50,6 +50,13 @@ export const TOOL_SCOPES: Record<string, Scope | null> = {
   validate_object: 'read',
   find_transport: 'read',
   run_unit_tests: 'read',
+  // LSP code-intelligence (all read-only)
+  document_symbols: 'read',
+  check_syntax: 'read',
+  go_to_definition: 'read',
+  find_references: 'read',
+  type_hierarchy: 'read',
+  completion: 'read',
   // writes
   create_object: 'write',
   update_source: 'write',

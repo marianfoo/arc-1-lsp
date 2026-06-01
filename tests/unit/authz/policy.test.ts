@@ -32,6 +32,12 @@ const ALL_TOOLS = [
   'delete_object',
   'generate_objects',
   'create_transport',
+  'document_symbols',
+  'check_syntax',
+  'go_to_definition',
+  'find_references',
+  'type_hierarchy',
+  'completion',
 ];
 
 describe('expandScopes (admin ⊇ transport ⊇ write ⊇ read)', () => {
@@ -51,8 +57,20 @@ describe('expandScopes (admin ⊇ transport ⊇ write ⊇ read)', () => {
 });
 
 describe('TOOL_SCOPES', () => {
-  it('covers exactly the 21 registered tools (no tool silently un-scoped)', () => {
+  it('covers exactly the 27 registered tools (no tool silently un-scoped)', () => {
     expect(Object.keys(TOOL_SCOPES).sort()).toEqual([...ALL_TOOLS].sort());
+  });
+  it('LSP code-intelligence tools are read-scoped', () => {
+    for (const t of [
+      'document_symbols',
+      'check_syntax',
+      'go_to_definition',
+      'find_references',
+      'type_hierarchy',
+      'completion',
+    ]) {
+      expect(TOOL_SCOPES[t]).toBe('read');
+    }
   });
   it('every value is a valid scope or null', () => {
     for (const v of Object.values(TOOL_SCOPES)) {

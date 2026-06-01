@@ -6,9 +6,9 @@ development — that delegates **all** ABAP/ADT interaction to SAP's own embedde
 owns the MCP front-end, auth/scopes, write-safety, and orchestration; `adt-ls`
 owns CSRF, locking, XML, activation, transport — everything system-specific.
 
-> **Status:** working — connects headless to a SAP system, exposes 21 MCP tools
-> (reads + a full create→edit→activate→test→delete authoring loop + RAP generation
-> and transport), runs locally
+> **Status:** working — connects headless to a SAP system, exposes 27 MCP tools
+> (reads + LSP code-intelligence + a full create→edit→activate→test→delete authoring
+> loop + RAP generation and transport), runs locally
 > over stdio or as a Docker app on SAP BTP Cloud Foundry. Single-tenant / one
 > technical user today; per-user principal propagation is on the roadmap.
 
@@ -54,7 +54,7 @@ capability boundary of `adt-ls` itself is in
 
 ## What works today
 
-**21 MCP tools.** Reads work read-only; mutating tools are gated behind
+**27 MCP tools.** Reads work read-only; mutating tools are gated behind
 `ARC1_ALLOW_WRITES` + a package allowlist (transport creation additionally needs
 `ARC1_ALLOW_TRANSPORT_WRITES`).
 
@@ -62,6 +62,11 @@ capability boundary of `adt-ls` itself is in
   `search_objects`, `list_inactive_objects`, `list_users`, `list_generators`,
   `get_generator_schema`, `get_object_type_details`, `get_service_binding`,
   `get_service_details`, `read_source`, `validate_object`, `find_transport`.
+- **Code intelligence (6, LSP):** `document_symbols` (outline), `go_to_definition`,
+  `find_references`, `type_hierarchy` (super/subtypes + implementations),
+  `check_syntax` (the ABAP syntax check, no activation needed), `completion`.
+  adt-ls is a language server — these proxy its standard `textDocument/*` APIs;
+  target a declared `symbol` by name or a 1-based `line`+`character`.
 - **Authoring loop (5, write-gated):** `create_object`, `update_source`,
   `activate_object`, `run_unit_tests`, `delete_object` — a full
   create → edit → activate → test → delete cycle, by object name, for modern
@@ -74,7 +79,7 @@ capability boundary of `adt-ls` itself is in
   `create_object`/`generate_objects` (pass the TR as `transport`).
 
 **Out of scope here (use main ARC-1):** classic object types (program/table/
-function group/domain/…), free SQL, navigation/where-used, ATC/lint, transport
+function group/domain/…), free SQL, ATC deep checks (`atc/runCheck`), transport
 *release/delete*, and git. These are honest limits of `adt-ls`'s headless surface,
 not missing features — details in [`docs/arc-1-feature-parity.md`](docs/arc-1-feature-parity.md).
 
@@ -293,8 +298,8 @@ automated from Conventional Commits via release-please.
 ## Status & roadmap
 
 ✅ foundation → ✅ containerize → ✅ deploy to BTP CF → ✅ headless connect
-(DIRECT) → ✅ read + authoring-loop + generation/transport tools (21) →
-✅ session self-heal.
+(DIRECT) → ✅ read + authoring-loop + generation/transport tools →
+✅ session self-heal → ✅ LSP code-intelligence (27 tools).
 
 **Next:** CC-mode deploy (code ready; needs a running Cloud Connector + bound
 `connectivity`/`destination`), then **per-user principal propagation** (one

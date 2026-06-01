@@ -67,8 +67,9 @@ silent empty result. **Don't hand-build URIs — use the one `getLsUri`/`create`
 | **Transport (find)** | MCP `abap_transport-get` `{destination,objectName,objectType,developmentPackage,isCreation}` | ✅ | wired `find_transport` — object-scoped TR lookup (read). Live ($TMP, isCreation): `{"isRecordingRequired":false,"transportRequests":[],"informationMessages":[]}` (→ $TMP needs no transport) |
 | **Transport (create)** | MCP `abap_transport-create` `{destination,developmentPackage,transportDescription,isCreation,objectName?,objectType?}` | ✅ | wired `create_transport` — mutating, gated by `allowTransportWrites` (+`allowWrites`) |
 | Service info | MCP `abap_business_services-fetch_service_information` (7 args from fetch_services output) | ✅ | wired `get_service_details` — OData URL/entity-sets for one service |
-| **ATC / lint** | LSP `atc/runCheck` | ❌ | "Object to be checked could not be determined" / "Internal error" for every param shape (`{uris}`,`{uri}`,`{objectUri}`,`+checkVariant`). Unreached. |
-| **Navigation / where-used** | LSP `textDocument/{documentSymbol,definition,references,hover}` | ❌ | `didOpen`-then-query **hangs**; not how adt-ls surfaces these |
+| **LSP code-intelligence** | LSP `textDocument/*` (didOpen → query → didClose) | ✅ | **§9 — CORRECTED.** documentSymbol / definition / declaration / references / prepareTypeHierarchy(+supertypes/subtypes) / diagnostic / completion all work headless. Earlier "hangs" was sending `didOpen` as a *request*; it's a **notification** (driver now has `sendNotification`). |
+| **Syntax check (pull)** | LSP `textDocument/diagnostic` | ✅ | §9 — the ABAP syntax check ADT runs, WITHOUT activating; `{kind:'full',items:[…]}`. (Distinct from `atc/runCheck` ATC, still unreached.) |
+| ATC (deep checks) | LSP `atc/runCheck` | ❌ | "Object to be checked could not be determined" for every param shape. Unreached (≠ the syntax-check diagnostic above, which works). |
 | Free SQL / data preview | — | ❌ | no such method |
 | Git (gCTS/abapGit) | — | ❌ | not exposed |
 
@@ -171,5 +172,52 @@ and explicit HTTP 401 (not bare `401`, to avoid false positives).
   full service; `ARC1_ALLOW_WRITES`), `create_transport` (CTS TR; additionally
   `ARC1_ALLOW_TRANSPORT_WRITES`). `create_object`/`generate_objects` accept a
   transport for non-$TMP packages. **21 tools total.**
-- **Out of scope (→ arc-1):** classic object types, ATC/lint, navigation/where-used,
+- **Code-intelligence (§9, the LSP channel):** documentSymbol, definition,
+  references, type-hierarchy, diagnostics (syntax check), completion — all work
+  headless via `textDocument/*`.
+- **Out of scope (→ arc-1):** classic object types, ATC deep checks (`atc/runCheck`),
   free SQL, git, transport *release/delete*.
+
+## 9. LSP code-intelligence (`textDocument/*`) — the second channel
+
+adt-ls is a **language server**, so beyond its MCP tools + the `adtLs/*` custom
+LSP it speaks the **standard LSP**. The `initialize` response advertises the
+supported providers (authoritative — dump it from `init.capabilities`):
+`hover, completion(+resolve), definition, declaration, references,
+documentHighlight, documentSymbol, codeLens, typeHierarchy, semanticTokens(full),
+diagnostic`; formatting/rename/signatureHelp/callHierarchy/implementation/
+workspaceSymbol are **absent**.
+
+**The flow (per object):** resolve name → repotree AFF URI (§1 `getLsUri`) →
+`readFile` for content → **`textDocument/didOpen` (a NOTIFICATION** —
+`{textDocument:{uri,languageId:'abap',version:1,text}}`) → query → `textDocument/didClose`.
+⚠ The earlier "navigation hangs" verdict was a **mistake**: `didOpen` was sent as a
+*request* (no response → deadlock). It's a notification — the driver now has
+`sendNotification` (`LspClient`); the engine exposes `engine.lsp`.
+
+**Live-verified against a4h (`CL_ABAP_TYPEDESCR` + a $TMP probe class), 2026-06-01:**
+
+| Method | Works? | Shape / notes |
+|---|---|---|
+| `textDocument/documentSymbol` | ✅ | hierarchical `DocumentSymbol[]` — `{name,kind,range,selectionRange,children}` (kind = LSP SymbolKind: 5 class, 6 method, 11 interface, 19 object/friend, …). The object outline. |
+| `textDocument/definition` | ✅ | `LocationLink[]` (`originSelectionRange`, `targetUri`, `targetRange`, `targetSelectionRange`). Position must be on an **identifier**. |
+| `textDocument/declaration` | ✅ | `LocationLink[]` — ~same as definition for ABAP. |
+| `textDocument/references` | ✅* | `Location[]` (`{uri,range}`). **\*Bounded symbols only** — a local var returned 4 hits instantly; on a kernel class (`CL_ABAP_TYPEDESCR`, used everywhere) it **"Internal error"s / hangs** (where-used volume). MUST wrap in a timeout. `context.includeDeclaration` honored. |
+| `textDocument/prepareTypeHierarchy` | ✅ | `TypeHierarchyItem[]` at the class-name identifier; `item.data.subtypes` carries a ready tree (name/adtUri/type/packageName/children). |
+| `typeHierarchy/supertypes` / `subtypes` | ✅ | `TypeHierarchyItem[]` — full inheritance/impl tree (e.g. CL_ABAP_TYPEDESCR → CL_ABAP_OBJECTDESCR → CL_ABAP_CLASSDESCR). This is "method implementations across implementing classes". |
+| `textDocument/diagnostic` | ✅ | `{kind:'full',items:[…]}` — the **ABAP syntax check ADT runs, without activating**. Empty items = clean. Pull-model (no position). |
+| `textDocument/completion` | ✅ | `CompletionList` `{isIncomplete,items:[{label,labelDetails,kind,textEdit,…}]}`. Large (keywords + context). |
+| `textDocument/semanticTokens/full` | ✅ | `{data:[…]}` LSP-encoded token ints + the legend from capabilities. Low LLM value (raw highlighting). |
+| `textDocument/hover` | ◐ | provider advertised but returns **`null`** at every position tried (class name, method, local var, type ref). Effectively non-functional headless — **skip** (revisit per release; Thomas's prototype has it working, so the invocation may differ). |
+| `textDocument/documentHighlight` | ◐ | returns `[]` even on a used local var. Low value. |
+| `textDocument/codeLens` | ◐ | returns `[]`. Low value headless. |
+
+**Positions:** LSP is 0-based `{line,character}`. For LLM-friendliness, position-based
+tools resolve a **symbol name** → its `selectionRange.start` via `documentSymbol`
+(works for declared symbols: class/method/attribute/type/interface), with an explicit
+`line`/`character` fallback for locals/usages.
+
+**Implement (LLM-valuable):** `document_symbols`, `go_to_definition`, `find_references`
+(timeout-guarded), `type_hierarchy` (prepare+super+sub), `check_syntax` (diagnostic),
+`completion`. **Skip (researched):** hover (null), declaration (≈definition),
+documentHighlight/codeLens/semanticTokens (low value). See plan 11.

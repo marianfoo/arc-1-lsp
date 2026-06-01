@@ -26,10 +26,11 @@ import {
   makeReentranceLogonHandler,
 } from '../adt-ls/destinations.js';
 import { resolveAdtLsPath } from '../adt-ls/discovery.js';
-import { AdtLsDriver, type LspRequester } from '../adt-ls/driver.js';
+import { AdtLsDriver, type LspClient, type LspRequester } from '../adt-ls/driver.js';
 import { type Lifecycle, createLifecycle } from '../adt-ls/lifecycle.js';
 import { AdtLsMcpClient, type McpTool } from '../adt-ls/mcp-federation.js';
 import { setMcpDestination, startMcpServer, stopMcpServer } from '../adt-ls/mcp-lifecycle.js';
+import { type Navigation, createNavigation } from '../adt-ls/navigation.js';
 import { type SearchReference, type UserRef, getInactiveObjects, getUsers, quickSearch } from '../adt-ls/repository.js';
 import { isLoggedOffFederatedResult, makeRelogon, makeWithRelogon } from '../adt-ls/session-retry.js';
 import { type TlsReverseProxy, startTlsReverseProxy } from '../adt-ls/tls-reverse-proxy.js';
@@ -61,6 +62,10 @@ export interface Engine {
   listUsers(): Promise<UserRef[]>;
   /** ABAP object authoring lifecycle (read/create/update/activate/test/delete). */
   lifecycle: Lifecycle;
+  /** Raw LSP client (request + notification) for code-intelligence (didOpen → query → didClose). */
+  lsp: LspClient;
+  /** LSP code-intelligence: document symbols, definition, references, type hierarchy, syntax check, completion. */
+  navigation: Navigation;
   /** The destination logged on at startup, if any. */
   connectedDestination?: string;
   /**
@@ -182,6 +187,12 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   const sessionRequester: LspRequester = {
     sendRequest: <T>(method: string, params?: unknown) => withRelogon<T>(() => driver.sendRequest<T>(method, params)),
   };
+  // Code-intelligence LSP client: relogon-wrapped requests + raw notifications
+  // (didOpen/didClose are fire-and-forget, no response to retry).
+  const lsp: LspClient = {
+    sendRequest: <T>(method: string, params?: unknown) => withRelogon<T>(() => driver.sendRequest<T>(method, params)),
+    sendNotification: (method: string, params?: unknown) => driver.sendNotification(method, params),
+  };
 
   const lifecycle = createLifecycle({
     driver: sessionRequester,
@@ -193,10 +204,13 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
       allowedPackages: config.allowedPackages,
     },
   });
+  const navigation = createNavigation({ lsp, lifecycle });
 
   const engine: Engine = {
     connectedDestination,
     lifecycle,
+    lsp,
+    navigation,
     health: () => ({
       adtLs: { name: init.serverInfo?.name, version: init.serverInfo?.version, up: true },
       mcpPort: started.port,

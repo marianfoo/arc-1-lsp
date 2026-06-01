@@ -394,5 +394,118 @@ export function createMcpServer(engine: Engine): McpServer {
     },
   );
 
+  // ── LSP code-intelligence (adt-ls is a language server; pure textDocument/*) ──
+  // Position-based tools: target a declared `symbol` by name (resolved via the
+  // outline), or pass explicit 1-based `line` + `character`. Modern types only
+  // (same boundary as read_source). All read-only.
+  const symbolArg = z
+    .string()
+    .optional()
+    .describe('Declared symbol to target (class/method/attribute/type/interface name), resolved to its position.');
+  const lineArg = z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('1-based line (use with `character` instead of `symbol`).');
+  const charArg = z.number().int().positive().optional().describe('1-based character/column (use with `line`).');
+
+  server.registerTool(
+    'document_symbols',
+    {
+      description:
+        'Outline an ABAP object — classes, interfaces, methods, attributes, types — with their source ranges (LSP documentSymbol). Use this to find symbol positions for the other navigation tools.',
+      inputSchema: { name: z.string(), objectType },
+    },
+    async ({ name, objectType: t }) => text(await engine.navigation.documentSymbols({ name, objectType: t })),
+  );
+
+  server.registerTool(
+    'check_syntax',
+    {
+      description:
+        'Run the ABAP syntax check on an object WITHOUT activating it (LSP pull diagnostics — the same check ADT runs). Returns diagnostics with ranges; empty = clean.',
+      inputSchema: { name: z.string(), objectType },
+    },
+    async ({ name, objectType: t }) => text(await engine.navigation.checkSyntax({ name, objectType: t })),
+  );
+
+  server.registerTool(
+    'go_to_definition',
+    {
+      description:
+        "Resolve where a symbol is defined (LSP definition). Target a declared `symbol` by name, or pass 1-based `line`+`character` for any identifier in the object's source.",
+      inputSchema: { name: z.string(), objectType, symbol: symbolArg, line: lineArg, character: charArg },
+    },
+    async ({ name, objectType: t, symbol, line, character }) =>
+      text(await engine.navigation.goToDefinition({ name, objectType: t }, { symbol, line, character })),
+  );
+
+  server.registerTool(
+    'find_references',
+    {
+      description:
+        'Find where a symbol is used (LSP references / where-used). Target a declared `symbol` by name or 1-based `line`+`character`. Heavily-used global symbols (e.g. a kernel class) can time out — narrow to a local or less-referenced symbol.',
+      inputSchema: {
+        name: z.string(),
+        objectType,
+        symbol: symbolArg,
+        line: lineArg,
+        character: charArg,
+        includeDeclaration: z
+          .boolean()
+          .optional()
+          .describe('Include the declaration itself in the results (default true).'),
+      },
+    },
+    async ({ name, objectType: t, symbol, line, character, includeDeclaration }) =>
+      text(
+        await engine.navigation.findReferences(
+          { name, objectType: t },
+          { symbol, line, character },
+          { includeDeclaration },
+        ),
+      ),
+  );
+
+  server.registerTool(
+    'type_hierarchy',
+    {
+      description:
+        'Show the inheritance / implementation tree of a class or interface (LSP type hierarchy): supertypes and/or subtypes, including method implementations across implementing classes. Target the type by `symbol` name or 1-based `line`+`character`.',
+      inputSchema: {
+        name: z.string(),
+        objectType,
+        symbol: symbolArg,
+        line: lineArg,
+        character: charArg,
+        direction: z
+          .enum(['supertypes', 'subtypes', 'both'])
+          .optional()
+          .describe('Which direction to expand (default both).'),
+      },
+    },
+    async ({ name, objectType: t, symbol, line, character, direction }) =>
+      text(await engine.navigation.typeHierarchy({ name, objectType: t }, { symbol, line, character }, { direction })),
+  );
+
+  server.registerTool(
+    'completion',
+    {
+      description:
+        'Code-completion proposals at a position (LSP completion) — keywords, types, methods in context. Target by `symbol` name or 1-based `line`+`character`. Results are capped (`maxItems`).',
+      inputSchema: {
+        name: z.string(),
+        objectType,
+        symbol: symbolArg,
+        line: lineArg,
+        character: charArg,
+        maxItems: z.number().int().positive().max(200).optional().describe('Max items to return (default 50).'),
+      },
+    },
+    async ({ name, objectType: t, symbol, line, character, maxItems }) =>
+      text(await engine.navigation.completion({ name, objectType: t }, { symbol, line, character }, { maxItems })),
+  );
+
   return server;
 }

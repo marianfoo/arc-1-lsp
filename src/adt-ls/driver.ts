@@ -40,6 +40,15 @@ export interface LspRequester {
 }
 
 /**
+ * Request + notification channel. LSP document features (didOpen → query →
+ * didClose) need fire-and-forget notifications, so the navigation layer depends
+ * on this fuller surface.
+ */
+export interface LspClient extends LspRequester {
+  sendNotification(method: string, params?: unknown): Promise<void>;
+}
+
+/**
  * Route a server→client request to a registered handler, with safe defaults.
  * Pure (no I/O) so it can be unit-tested directly.
  * - registered handler wins (e.g. `adtLs/destinations/requestBrowserBasedLogon`)
@@ -69,7 +78,7 @@ function timeoutReject(ms: number): Promise<never> {
   });
 }
 
-export class AdtLsDriver implements LspRequester {
+export class AdtLsDriver implements LspClient {
   private child?: ChildProcess;
   private server?: net.Server;
   private conn?: MessageConnection;
@@ -169,6 +178,11 @@ export class AdtLsDriver implements LspRequester {
   async sendRequest<T = unknown>(method: string, params?: unknown): Promise<T> {
     if (!this.conn) throw new Error('AdtLsDriver not started');
     return this.conn.sendRequest(method, params) as Promise<T>;
+  }
+
+  async sendNotification(method: string, params?: unknown): Promise<void> {
+    if (!this.conn) throw new Error('AdtLsDriver not started');
+    await this.conn.sendNotification(method, params);
   }
 
   async dispose(): Promise<void> {

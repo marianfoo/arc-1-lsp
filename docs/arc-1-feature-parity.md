@@ -7,8 +7,8 @@ wired, and why / why not.** All claims are backed by live probes against a4h
 > **Status (2026-05-29):** the full ABAP **authoring loop is implemented** in
 > arc-1-lsp — read_source, create, update, activate, run_unit_tests, delete — pure
 > adt-ls, behind a write-safety layer, live-verified on a4h. The by-name resolver
-> (`getLsUri`) is solved. **21 tools** (plan 07 added generation, transport, and
-> validation). (History: an earlier version of this doc
+> (`getLsUri`) is solved. **27 tools** (plan 07 added generation/transport/validation;
+> plan 11 added LSP code-intelligence). (History: an earlier version of this doc
 > wrongly called these "blocked by a workspace-model limitation" — that was a
 > wrong-URI-shape mistake; the canonical repotree/AFF URIs work headless.)
 
@@ -34,8 +34,8 @@ wired, and why / why not.** All claims are backed by live probes against a4h
 | **SAPActivate** | ✅ `activate_object` (+ `list_inactive_objects`) | returns syntax diagnostics |
 | **SAPDiagnose** (unit tests) | ✅ `run_unit_tests` | no dumps/traces/ATC |
 | **SAPManage** (partial) | ◑ `list_generators`/`get_generator_schema`/**`generate_objects`**/`get_object_type_details`/**`validate_object`**/`get_service_binding`/**`get_service_details`** | RAP generation now wired; no package CRUD / FLP / UI5 |
-| **SAPNavigate** (def/refs/where-used) | ❌ | `textDocument/*` unreached headless → arc-1 |
-| **SAPLint** (ATC/abaplint) | ❌ | `atc/runCheck` unreached; activate gives syntax diagnostics only |
+| **SAPNavigate** (def/refs/where-used) | ✅ `go_to_definition`/`find_references`/`document_symbols`/`type_hierarchy` | LSP `textDocument/*` — **works headless** (didOpen-as-notification; §9). Corrects the earlier "unreached" verdict. |
+| **SAPLint** (ATC/abaplint) | ◑ `check_syntax` | LSP `textDocument/diagnostic` = the ABAP syntax check (no activation). ATC deep checks (`atc/runCheck`) still ❌. |
 | **SAPQuery** (free SQL) | ❌ | absent in adt-ls → arc-1 |
 | **SAPTransport** | ◑ `find_transport` (read) + `create_transport` (write, gated) | object-scoped find + TR create; no release/delete (→ arc-1) |
 | **SAPGit** | ❌ | absent in adt-ls → arc-1 |
@@ -105,11 +105,14 @@ SQL, git. Honest adt-ls limits → arc-1 territory.
 
 ## 5. What can be achieved in arc-1-lsp (pure adt-ls) — current state
 
-**Live, wired (21 tools):**
+**Live, wired (27 tools):**
 - Reads: `search_objects`, `read_source`, `list_users`, `list_inactive_objects`,
   `list_generators`, `get_generator_schema`, `get_object_type_details`,
   `get_service_binding`, `get_service_details`, `validate_object`, `find_transport`,
   `list_creatable_objects`, `list_destinations`, `health`.
+- **Code intelligence (LSP `textDocument/*`):** `document_symbols`, `go_to_definition`,
+  `find_references`, `type_hierarchy`, `check_syntax`, `completion` — see §9 of
+  the reference doc.
 - **Authoring loop (modern types, behind `ARC1_ALLOW_WRITES` + package allowlist):**
   `create_object`, `update_source`, `activate_object`, `run_unit_tests`,
   `delete_object` — full create→edit→activate→test→delete, by name, live-verified.
