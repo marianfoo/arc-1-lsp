@@ -104,16 +104,21 @@ export function createLifecycle(deps: LifecycleDeps) {
       name: string;
       packageName: string;
       description: string;
+      /** CTS transport for non-$TMP packages; `''` (default) for local objects. */
+      transportRequestNumber?: string;
     }): Promise<CreateResult> {
       assertWriteAllowed(safety, { action: 'create_object', packageName: args.packageName });
       const res = await callTool('abap_creation-create_object', {
         destination: dest(),
         objectType: args.objectType,
+        // objectContent stays {name,packageName,description}; the transport is a
+        // SEPARATE top-level arg (adt-ls marks it required — '' means local/$TMP).
         objectContent: JSON.stringify({
           name: args.name,
           packageName: args.packageName,
           description: args.description,
         }),
+        transportRequestNumber: args.transportRequestNumber ?? '',
       });
       const { ok, data, text } = parseFederated(res);
       if (!ok) throw new Error(`create_object failed: ${text}`);
@@ -147,6 +152,102 @@ export function createLifecycle(deps: LifecycleDeps) {
       assertWriteAllowed(safety, { action: 'delete_object' });
       const uri = await resolveAffUri(args);
       await deleteFile(driver, metadataAffUri(uri));
+    },
+
+    /**
+     * Run a RAP generator (e.g. OData UI service): scaffolds a full set of objects
+     * (table/CDS/BDEF/SRVD/SRVB) into `packageName`. `content` is the JSON string
+     * matching the generator's get_schema. Mutating (gated by writes + package).
+     */
+    async generateObjects(args: {
+      generatorId: string;
+      content: string;
+      packageName: string;
+      transportRequestNumber?: string;
+      referencedObjectType?: string;
+      referencedObjectName?: string;
+    }): Promise<unknown> {
+      assertWriteAllowed(safety, { action: 'generate_objects', packageName: args.packageName });
+      const res = await callTool('abap_generators-generate_objects', {
+        destination: dest(),
+        generatorId: args.generatorId,
+        content: args.content,
+        packageName: args.packageName,
+        transportRequestNumber: args.transportRequestNumber ?? '',
+        referencedObjectType: args.referencedObjectType ?? '',
+        referencedObjectName: args.referencedObjectName ?? '',
+      });
+      const { ok, data, text } = parseFederated(res);
+      if (!ok) throw new Error(`generate_objects failed: ${text}`);
+      return data;
+    },
+
+    /**
+     * Validate an object's creation input before create (read-only). Returns the
+     * validation verdict; a "would-be-invalid" result is data, not a thrown error.
+     */
+    async validateObject(args: {
+      objectType: string;
+      name: string;
+      packageName: string;
+      description: string;
+    }): Promise<unknown> {
+      const res = await callTool('abap_creation-run_validation', {
+        destination: dest(),
+        objectType: args.objectType,
+        objectContent: JSON.stringify({
+          name: args.name,
+          packageName: args.packageName,
+          description: args.description,
+        }),
+      });
+      return parseFederated(res).data;
+    },
+
+    /**
+     * Find the transport request(s) relevant to creating/changing ONE object
+     * (read-only validation, object-scoped — not a system transport list).
+     */
+    async findTransport(args: {
+      objectName: string;
+      objectType: string;
+      developmentPackage: string;
+      isCreation: boolean;
+    }): Promise<unknown> {
+      const res = await callTool('abap_transport-get', {
+        destination: dest(),
+        objectName: args.objectName,
+        objectType: args.objectType,
+        developmentPackage: args.developmentPackage,
+        isCreation: args.isCreation,
+      });
+      return parseFederated(res).data;
+    },
+
+    /** Create a CTS transport request (mutating — gated by transport-writes). */
+    async createTransport(args: {
+      developmentPackage: string;
+      transportDescription: string;
+      isCreation: boolean;
+      objectName?: string;
+      objectType?: string;
+    }): Promise<unknown> {
+      assertWriteAllowed(safety, {
+        action: 'create_transport',
+        packageName: args.developmentPackage,
+        requireTransportWrites: true,
+      });
+      const res = await callTool('abap_transport-create', {
+        destination: dest(),
+        developmentPackage: args.developmentPackage,
+        transportDescription: args.transportDescription,
+        isCreation: args.isCreation,
+        ...(args.objectName ? { objectName: args.objectName } : {}),
+        ...(args.objectType ? { objectType: args.objectType } : {}),
+      });
+      const { ok, data, text } = parseFederated(res);
+      if (!ok) throw new Error(`create_transport failed: ${text}`);
+      return data;
     },
   };
 }

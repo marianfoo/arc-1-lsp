@@ -88,15 +88,20 @@ describe('loadConfig — sapTarget', () => {
 });
 
 describe('loadConfig — write safety', () => {
-  it('defaults: writes off, allowedPackages [$TMP]', () => {
+  it('defaults: writes off, transport-writes off, allowedPackages [$TMP]', () => {
     const c = loadConfig([], {});
     expect(c.allowWrites).toBe(false);
+    expect(c.allowTransportWrites).toBe(false);
     expect(c.allowedPackages).toEqual(['$TMP']);
   });
   it('ARC1_ALLOW_WRITES + ARC1_ALLOWED_PACKAGES override', () => {
     const c = loadConfig([], { ARC1_ALLOW_WRITES: 'true', ARC1_ALLOWED_PACKAGES: '$TMP, ZARC*, ZTEST' });
     expect(c.allowWrites).toBe(true);
     expect(c.allowedPackages).toEqual(['$TMP', 'ZARC*', 'ZTEST']);
+  });
+  it('ARC1_ALLOW_TRANSPORT_WRITES toggles transport writes (env + CLI)', () => {
+    expect(loadConfig([], { ARC1_ALLOW_TRANSPORT_WRITES: 'true' }).allowTransportWrites).toBe(true);
+    expect(loadConfig(['--allow-transport-writes', 'true'], {}).allowTransportWrites).toBe(true);
   });
   it('CLI flags override', () => {
     const c = loadConfig(['--allow-writes', 'true', '--allowed-packages', 'Z*'], {});

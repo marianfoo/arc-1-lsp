@@ -21,6 +21,10 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
       activate: async () => ({ success: true, diagnostics: [] }),
       runUnitTests: async () => ({ result: 'No tests found' }),
       deleteObject: async () => {},
+      generateObjects: async () => ({ generatedObjects: ['ZI_X'] }),
+      validateObject: async () => ({ valid: true }),
+      findTransport: async () => ({ transports: [] }),
+      createTransport: async () => ({ transportRequestNumber: 'A4HK900123' }),
     },
     reconnect: async () => true,
     dispose: async () => {},
@@ -43,10 +47,14 @@ describe('createMcpServer', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       'activate_object',
       'create_object',
+      'create_transport',
       'delete_object',
+      'find_transport',
+      'generate_objects',
       'get_generator_schema',
       'get_object_type_details',
       'get_service_binding',
+      'get_service_details',
       'health',
       'list_creatable_objects',
       'list_destinations',
@@ -57,6 +65,7 @@ describe('createMcpServer', () => {
       'run_unit_tests',
       'search_objects',
       'update_source',
+      'validate_object',
     ]);
   });
 
@@ -325,5 +334,152 @@ describe('createMcpServer', () => {
     });
     expect(res.isError).toBe(true);
     expect(JSON.stringify(res.content)).toContain('Writes are disabled');
+  });
+
+  it('generate_objects maps package→packageName + transport→transportRequestNumber for the lifecycle', async () => {
+    let got: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        lifecycle: {
+          ...fakeEngine().lifecycle,
+          generateObjects: async (a: unknown) => {
+            got = a;
+            return { generatedObjects: ['ZI_X'] };
+          },
+        },
+      }),
+    );
+    await client.callTool({
+      name: 'generate_objects',
+      arguments: {
+        generatorId: 'x-ui-service',
+        content: '{"a":1}',
+        package: '$TMP',
+        referencedObjectType: 'TABL',
+        referencedObjectName: 'SCARR',
+      },
+    });
+    expect(got).toEqual({
+      generatorId: 'x-ui-service',
+      content: '{"a":1}',
+      packageName: '$TMP',
+      transportRequestNumber: undefined,
+      referencedObjectType: 'TABL',
+      referencedObjectName: 'SCARR',
+    });
+  });
+
+  it('validate_object maps package→packageName for the lifecycle', async () => {
+    let got: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        lifecycle: {
+          ...fakeEngine().lifecycle,
+          validateObject: async (a: unknown) => {
+            got = a;
+            return { valid: true };
+          },
+        },
+      }),
+    );
+    await client.callTool({
+      name: 'validate_object',
+      arguments: { objectType: 'CLAS/OC', name: 'ZCL_X', package: '$TMP', description: 'x' },
+    });
+    expect(got).toEqual({ objectType: 'CLAS/OC', name: 'ZCL_X', packageName: '$TMP', description: 'x' });
+  });
+
+  it('find_transport passes object-scoped args to the lifecycle', async () => {
+    let got: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        lifecycle: {
+          ...fakeEngine().lifecycle,
+          findTransport: async (a: unknown) => {
+            got = a;
+            return { transports: [] };
+          },
+        },
+      }),
+    );
+    await client.callTool({
+      name: 'find_transport',
+      arguments: { objectName: 'ZCL_X', objectType: 'CLAS/OC', developmentPackage: 'ZFOO', isCreation: true },
+    });
+    expect(got).toEqual({ objectName: 'ZCL_X', objectType: 'CLAS/OC', developmentPackage: 'ZFOO', isCreation: true });
+  });
+
+  it('create_transport passes args to the lifecycle and returns the TR', async () => {
+    let got: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        lifecycle: {
+          ...fakeEngine().lifecycle,
+          createTransport: async (a: unknown) => {
+            got = a;
+            return { transportRequestNumber: 'A4HK900123' };
+          },
+        },
+      }),
+    );
+    const res = await client.callTool({
+      name: 'create_transport',
+      arguments: { developmentPackage: 'ZFOO', transportDescription: 'My change', isCreation: true },
+    });
+    expect(got).toEqual({
+      developmentPackage: 'ZFOO',
+      transportDescription: 'My change',
+      isCreation: true,
+      objectName: undefined,
+      objectType: undefined,
+    });
+    expect(JSON.stringify(res.content)).toContain('A4HK900123');
+  });
+
+  it('get_service_details federates to fetch_service_information with the connected destination', async () => {
+    let got: { name?: string; args?: Record<string, unknown> } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        callTool: async (name, args) => {
+          got = { name, args };
+          return { content: [{ type: 'text', text: '{"odataUrl":"/x"}' }] };
+        },
+      }),
+    );
+    await client.callTool({
+      name: 'get_service_details',
+      arguments: {
+        serviceBindingName: 'B',
+        serviceName: 'S',
+        serviceDefinition: 'D',
+        serviceVersion: '0001',
+        odataInfoUri: '/info',
+        odataVersion: 'V4',
+      },
+    });
+    expect(got.name).toBe('abap_business_services-fetch_service_information');
+    expect(got.args).toMatchObject({
+      destination: 'A4H',
+      serviceBindingName: 'B',
+      serviceName: 'S',
+      odataVersion: 'V4',
+    });
+  });
+
+  it('get_service_details errors clearly with no destination', async () => {
+    const client = await linkedClient(fakeEngine());
+    const res = await client.callTool({
+      name: 'get_service_details',
+      arguments: {
+        serviceBindingName: 'B',
+        serviceName: 'S',
+        serviceDefinition: 'D',
+        serviceVersion: '0001',
+        odataInfoUri: '/info',
+        odataVersion: 'V4',
+      },
+    });
+    expect(JSON.stringify(res.content)).toContain('No ABAP destination is connected');
   });
 });

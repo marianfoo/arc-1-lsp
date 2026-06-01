@@ -48,6 +48,8 @@ export interface Arc1LspConfig {
   sapDestination?: string;
   /** Enable mutating tools (create/update/activate/delete). Default false. */
   allowWrites: boolean;
+  /** Enable CTS transport mutations (create_transport). Also requires allowWrites. Default false. */
+  allowTransportWrites: boolean;
   /** Packages writes may target (exact / `PREFIX*` / `*`). Default `['$TMP']`. */
   allowedPackages: string[];
 }
@@ -102,6 +104,7 @@ export function loadConfig(
     sapTarget: loadSapTarget(argv, env),
     sapDestination: flag(argv, 'sap-destination') ?? env.ARC1_SAP_DESTINATION,
     allowWrites: bool(flag(argv, 'allow-writes') ?? env.ARC1_ALLOW_WRITES, false),
+    allowTransportWrites: bool(flag(argv, 'allow-transport-writes') ?? env.ARC1_ALLOW_TRANSPORT_WRITES, false),
     allowedPackages: (flag(argv, 'allowed-packages') ?? env.ARC1_ALLOWED_PACKAGES ?? '$TMP')
       .split(',')
       .map((p) => p.trim())

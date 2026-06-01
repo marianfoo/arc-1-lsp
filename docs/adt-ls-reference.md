@@ -56,14 +56,17 @@ silent empty result. **Don't hand-build URIs — use the one `getLsUri`/`create`
 | Inactive list | LSP `activation/getInactiveObjects` `{destinationId}` | ✅ | wired `list_inactive_objects` (returned `[]` even mid-edit — semantics unclear) |
 | **Resolve name→URI** | LSP `repository/getLsUri` `{destination,adtUri}` | ✅ | §1 — the key enabler, unwired |
 | **Read source** | LSP `fileSystem/readFile` `{uri:<repotree>}` | ✅ | → `{content}`; supported types only (§4); unwired |
-| **Create object** | MCP `abap_creation-create_object` `{destination,objectType,objectContent}` | ✅ | `objectContent` = **JSON string** `{name,packageName,description}`; returns the AFF filePath; mutating |
+| **Create object** | MCP `abap_creation-create_object` `{destination,objectType,objectContent,transportRequestNumber}` | ✅ | `objectContent` = **JSON string** `{name,packageName,description}`; `transportRequestNumber` is a **top-level** arg (`''`=local/$TMP, else a real TR for transportable packages — required by the schema); returns the AFF filePath; mutating |
 | **Update source** | LSP `fileSystem/writeFile` `{uri,content}` | ✅ | `content` = **plain multi-line** source (NOT base64 — 255-char/line limit); no manual lock needed; mutating |
 | **Activate** | MCP `abap_activate_objects` `{destination,uris:[<repotree>]}` | ✅ | → `{success, objectDiagnostics:[{lsUri,diagnostic:[{range,…}]}]}` — **structured errors on failure** (§5); mutating |
 | **Run unit tests** | MCP `abap_run_unit_tests` `{destination,uris:[<repotree>]}` | ✅ | → results / "No tests found" |
 | **Lock / unlock** | LSP `fileSystem/{lockFile,unlockFile,getFileLockStatus}` `{uri}` | ✅ | `{operationExecuted:true}`; writeFile doesn't require it |
 | **Delete object** | LSP `fileSystem/delete` `{uri:<…clas.json>}` | ✅ | delete the **`.json`** metadata file (not `.abap`); mutating |
-| Validate creation | MCP `abap_creation-run_validation` | ◐ | needs the full `objectContent` like create |
-| Transport read | MCP `abap_transport-get` | ◐ | needs `{destination,developmentPackage,objectName,objectType,isCreation}` |
+| **Generate objects** | MCP `abap_generators-generate_objects` `{destination,generatorId,content,packageName,transportRequestNumber,referencedObjectType,referencedObjectName}` | ✅ | wired `generate_objects` — runs a RAP generator → full service (table/CDS/BDEF/SRVD/SRVB); mutating, gated; `content` = JSON string matching get_schema |
+| **Validate creation** | MCP `abap_creation-run_validation` `{destination,objectType,objectContent}` | ✅ | wired `validate_object` — pre-create check; `objectContent` like create. Live ($TMP CLAS, valid): `{"message":"ABAP Class validated successfully"}` |
+| **Transport (find)** | MCP `abap_transport-get` `{destination,objectName,objectType,developmentPackage,isCreation}` | ✅ | wired `find_transport` — object-scoped TR lookup (read). Live ($TMP, isCreation): `{"isRecordingRequired":false,"transportRequests":[],"informationMessages":[]}` (→ $TMP needs no transport) |
+| **Transport (create)** | MCP `abap_transport-create` `{destination,developmentPackage,transportDescription,isCreation,objectName?,objectType?}` | ✅ | wired `create_transport` — mutating, gated by `allowTransportWrites` (+`allowWrites`) |
+| Service info | MCP `abap_business_services-fetch_service_information` (7 args from fetch_services output) | ✅ | wired `get_service_details` — OData URL/entity-sets for one service |
 | **ATC / lint** | LSP `atc/runCheck` | ❌ | "Object to be checked could not be determined" / "Internal error" for every param shape (`{uris}`,`{uri}`,`{objectUri}`,`+checkVariant`). Unreached. |
 | **Navigation / where-used** | LSP `textDocument/{documentSymbol,definition,references,hover}` | ❌ | `didOpen`-then-query **hangs**; not how adt-ls surfaces these |
 | Free SQL / data preview | — | ❌ | no such method |
@@ -158,10 +161,15 @@ and explicit HTTP 401 (not bare `401`, to avoid false positives).
 
 - **Reads (live):** search_objects, read_source, list_users, list_inactive_objects,
   list_generators, get_generator_schema, get_object_type_details, get_service_binding,
-  list_creatable_objects, list_destinations, health.
+  get_service_details, validate_object, find_transport, list_creatable_objects,
+  list_destinations, health.
 - **Authoring loop (live, modern types, behind `ARC1_ALLOW_WRITES` + package allowlist):**
   create_object, update_source, activate_object, run_unit_tests, delete_object —
   by name via `getLsUri`; full create→edit→activate→test→delete live-verified.
   Safety: `src/server/safety.ts`. Lifecycle: `src/adt-ls/lifecycle.ts`.
+- **Generation + transport (live, gated):** `generate_objects` (RAP generator →
+  full service; `ARC1_ALLOW_WRITES`), `create_transport` (CTS TR; additionally
+  `ARC1_ALLOW_TRANSPORT_WRITES`). `create_object`/`generate_objects` accept a
+  transport for non-$TMP packages. **21 tools total.**
 - **Out of scope (→ arc-1):** classic object types, ATC/lint, navigation/where-used,
-  free SQL, git, transport writes, RAP generation.
+  free SQL, git, transport *release/delete*.

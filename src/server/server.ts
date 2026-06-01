@@ -281,5 +281,117 @@ export function createMcpServer(engine: Engine): McpServer {
     },
   );
 
+  // ── Generation, validation & transport (pure adt-ls) ──
+  server.registerTool(
+    'generate_objects',
+    {
+      description:
+        'Run a RAP object generator (from list_generators) — scaffolds a full RAP service (table/CDS/behavior/service definition+binding) into a package (mutating — requires ARC1_ALLOW_WRITES; package must be allowed). `content` is the JSON matching get_generator_schema. Object-referencing generators (OData UI / Web-API service) also need referencedObjectType + referencedObjectName. For transportable (non-$TMP) packages, pass a transport from find_transport/create_transport.',
+      inputSchema: {
+        generatorId: z.string().describe('Generator id from list_generators (e.g. "x-ui-service").'),
+        content: z.string().describe('JSON string matching the get_generator_schema structure.'),
+        package: z.string().describe('Target development package, e.g. "$TMP".'),
+        transport: z.string().optional().describe('CTS transport number for non-$TMP packages; omit for local.'),
+        referencedObjectType: z
+          .string()
+          .optional()
+          .describe('For object-built generators: referenced object type ("TABL", "DDLS", "BDEF", …).'),
+        referencedObjectName: z.string().optional().describe('For object-built generators: referenced object name.'),
+      },
+    },
+    async ({ generatorId, content, package: pkg, transport, referencedObjectType, referencedObjectName }) =>
+      text(
+        await engine.lifecycle.generateObjects({
+          generatorId,
+          content,
+          packageName: pkg,
+          transportRequestNumber: transport,
+          referencedObjectType,
+          referencedObjectName,
+        }),
+      ),
+  );
+
+  server.registerTool(
+    'validate_object',
+    {
+      description:
+        'Validate object-creation input before create_object (read-only). Mirrors create_object inputs; returns the validation verdict (including whether a transport is required for the package).',
+      inputSchema: {
+        objectType,
+        name: z.string(),
+        package: z.string().describe('Development package, e.g. "$TMP".'),
+        description: z.string(),
+      },
+    },
+    async ({ objectType: t, name, package: pkg, description }) =>
+      text(await engine.lifecycle.validateObject({ objectType: t, name, packageName: pkg, description })),
+  );
+
+  server.registerTool(
+    'find_transport',
+    {
+      description:
+        'Find the transport request(s) relevant to creating/changing ONE ABAP object (read-only; object-scoped, not a system transport list). Call before create_object/generate_objects for transportable packages; for $TMP no transport is needed.',
+      inputSchema: {
+        objectName: z.string(),
+        objectType,
+        developmentPackage: z.string().describe('Development package the object lives in.'),
+        isCreation: z.boolean().describe('true if the object is being created; false if modified/deleted.'),
+      },
+    },
+    async ({ objectName, objectType: t, developmentPackage, isCreation }) =>
+      text(await engine.lifecycle.findTransport({ objectName, objectType: t, developmentPackage, isCreation })),
+  );
+
+  server.registerTool(
+    'create_transport',
+    {
+      description:
+        'Create a CTS transport request (mutating — requires ARC1_ALLOW_WRITES + ARC1_ALLOW_TRANSPORT_WRITES). Use find_transport first to check whether a new transport is actually needed.',
+      inputSchema: {
+        developmentPackage: z.string().describe('Development package the transport is for.'),
+        transportDescription: z.string().describe('Short description (like a git commit subject).'),
+        isCreation: z.boolean().describe('true if creating the object; false if modifying.'),
+        objectName: z.string().optional(),
+        objectType: z.string().optional(),
+      },
+    },
+    async ({ developmentPackage, transportDescription, isCreation, objectName, objectType: t }) =>
+      text(
+        await engine.lifecycle.createTransport({
+          developmentPackage,
+          transportDescription,
+          isCreation,
+          objectName,
+          objectType: t,
+        }),
+      ),
+  );
+
+  server.registerTool(
+    'get_service_details',
+    {
+      description:
+        'Fetch OData service details (URL, entity sets, navigations) for ONE service of a binding. Its inputs are taken from get_service_binding output (the service list). Read-only.',
+      inputSchema: {
+        serviceBindingName: z.string(),
+        serviceName: z.string(),
+        serviceDefinition: z.string(),
+        serviceVersion: z.string(),
+        odataInfoUri: z.string().describe('odataInfoUri from get_service_binding output.'),
+        odataVersion: z.string().describe('OData version, "V2" or "V4".'),
+        isPublished: z.boolean().optional(),
+      },
+    },
+    async (args) => {
+      const dest = engine.connectedDestination;
+      if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
+      return text(
+        await engine.callTool('abap_business_services-fetch_service_information', { destination: dest, ...args }),
+      );
+    },
+  );
+
   return server;
 }

@@ -7,7 +7,8 @@ wired, and why / why not.** All claims are backed by live probes against a4h
 > **Status (2026-05-29):** the full ABAP **authoring loop is implemented** in
 > arc-1-lsp — read_source, create, update, activate, run_unit_tests, delete — pure
 > adt-ls, behind a write-safety layer, live-verified on a4h. The by-name resolver
-> (`getLsUri`) is solved. 16 tools total. (History: an earlier version of this doc
+> (`getLsUri`) is solved. **21 tools** (plan 07 added generation, transport, and
+> validation). (History: an earlier version of this doc
 > wrongly called these "blocked by a workspace-model limitation" — that was a
 > wrong-URI-shape mistake; the canonical repotree/AFF URIs work headless.)
 
@@ -32,11 +33,11 @@ wired, and why / why not.** All claims are backed by live probes against a4h
 | **SAPWrite** (create/update/delete) | ✅ `create_object`/`update_source`/`delete_object` | modern types; behind `allowWrites`; include-aware. No method-surgery/AFF-validation/batch yet. |
 | **SAPActivate** | ✅ `activate_object` (+ `list_inactive_objects`) | returns syntax diagnostics |
 | **SAPDiagnose** (unit tests) | ✅ `run_unit_tests` | no dumps/traces/ATC |
-| **SAPManage** (partial) | ◑ `list_generators`/`get_generator_schema`/`get_object_type_details`/`get_service_binding` | no package CRUD / FLP / UI5 |
+| **SAPManage** (partial) | ◑ `list_generators`/`get_generator_schema`/**`generate_objects`**/`get_object_type_details`/**`validate_object`**/`get_service_binding`/**`get_service_details`** | RAP generation now wired; no package CRUD / FLP / UI5 |
 | **SAPNavigate** (def/refs/where-used) | ❌ | `textDocument/*` unreached headless → arc-1 |
 | **SAPLint** (ATC/abaplint) | ❌ | `atc/runCheck` unreached; activate gives syntax diagnostics only |
 | **SAPQuery** (free SQL) | ❌ | absent in adt-ls → arc-1 |
-| **SAPTransport** | ❌ (◑ `transport-get` reachable, unwired) | clunky args; CTS write unwired |
+| **SAPTransport** | ◑ `find_transport` (read) + `create_transport` (write, gated) | object-scoped find + TR create; no release/delete (→ arc-1) |
 | **SAPGit** | ❌ | absent in adt-ls → arc-1 |
 | **SAPContext** (deps/compression) | ❌ | depends on navigation → arc-1 |
 | *(adt-ls extras)* | ✅ `health`, `list_destinations`, `list_creatable_objects`, `list_users` | |
@@ -64,7 +65,7 @@ create class → `readFile` returns its source → `activate` → `{success:true
 | Search — `repository/quickSearch` | ✅ | ✅ `search_objects` | `{destination,pattern,types}` |
 | Users — `repository/getUsers` | ✅ | ✅ `list_users` | `{destination}` |
 | Creatable types / object-type fields | ✅ | ✅ `list_creatable_objects` / `get_object_type_details` | |
-| Generators — `abap_generators-*` | ✅ | ✅ `list_generators` / `get_generator_schema` | |
+| Generators — `abap_generators-*` | ✅ | ✅ `list_generators` / `get_generator_schema` / `generate_objects` | generate scaffolds a full RAP service; gated |
 | Inactive list — `getInactiveObjects` | ✅ | ✅ `list_inactive_objects` | |
 | Service bindings — `fetch_services` | ✅ | ✅ `get_service_binding` | |
 | **read_source** — `fileSystem/readFile` | ✅ | ✅ `read_source` | by name via `getLsUri`; modern types only (§4); include-aware |
@@ -74,10 +75,12 @@ create class → `readFile` returns its source → `activate` → `{success:true
 | **run_unit_tests** — `abap_run_unit_tests` | ✅ | ✅ `run_unit_tests` | by name; ungated |
 | **delete** — `fileSystem/delete` | ✅ | ✅ `delete_object` | deletes the `.clas.json`; gated |
 | lock / unlock — `fileSystem/{lockFile,unlockFile}` | ✅ | (internal) | adt-ls locks on write; not exposed as a tool |
-| validate creation — `abap_creation-run_validation` | needs `objectContent` | ❌ | same input as create |
+| validate creation — `abap_creation-run_validation` | ✅ | ✅ `validate_object` | pre-create check; same input as create |
 | **ATC** — `atc/runCheck` | ❌ unreached | ❌ | "Object to be checked could not be determined" even with the AFF URI (`{uris}` and `{uri}`). Param/context unknown. |
 | **navigation** — `textDocument/{documentSymbol,definition,hover}` | ❌ unclear | ❌ | `didOpen`-then-query **hangs** headless; not the path adt-ls uses. SAPNavigate = unreached. |
-| transport read — `abap_transport-get` | needs 5 args (`isCreation`…) | ❌ | clunky; low priority |
+| transport find — `abap_transport-get` | ✅ | ✅ `find_transport` | object-scoped TR lookup (read) |
+| transport create — `abap_transport-create` | ✅ | ✅ `create_transport` | CTS TR; gated by `allowTransportWrites` |
+| service info — `abap_business_services-fetch_service_information` | ✅ | ✅ `get_service_details` | OData URL/entity-sets for one service |
 | Free SQL / data preview | — | ❌ | **absent** from adt-ls |
 | Git (gCTS/abapGit) | — | ❌ | **absent** from adt-ls |
 
@@ -102,18 +105,22 @@ SQL, git. Honest adt-ls limits → arc-1 territory.
 
 ## 5. What can be achieved in arc-1-lsp (pure adt-ls) — current state
 
-**Live, wired (16 tools):**
+**Live, wired (21 tools):**
 - Reads: `search_objects`, `read_source`, `list_users`, `list_inactive_objects`,
   `list_generators`, `get_generator_schema`, `get_object_type_details`,
-  `get_service_binding`, `list_creatable_objects`, `list_destinations`, `health`.
+  `get_service_binding`, `get_service_details`, `validate_object`, `find_transport`,
+  `list_creatable_objects`, `list_destinations`, `health`.
 - **Authoring loop (modern types, behind `ARC1_ALLOW_WRITES` + package allowlist):**
   `create_object`, `update_source`, `activate_object`, `run_unit_tests`,
   `delete_object` — full create→edit→activate→test→delete, by name, live-verified.
+- **Generation + transport (gated):** `generate_objects` (RAP generator → full
+  service), `create_transport` (CTS TR; additionally `ARC1_ALLOW_TRANSPORT_WRITES`).
+  `create_object`/`generate_objects` accept a transport for non-$TMP packages.
 
-**Not yet wired but reachable:** `transport-get` (clunky args), `run_validation`,
-richer SAPWrite (method surgery, AFF validation, batch — arc-1 has these).
+**Not yet wired but reachable:** richer SAPWrite (method surgery, AFF validation,
+batch — arc-1 has these).
 
 **Out of scope for arc-1-lsp (→ arc-1):** classic object types, ATC/lint,
-navigation/where-used, free SQL, git, transport *writes*, RAP generation (mutating,
-unwired). These are the honest map of adt-ls's headless limits — a feature of the
-comparison, not a defect to paper over with a hybrid.
+navigation/where-used, free SQL, git, transport *release/delete*. These are the
+honest map of adt-ls's headless limits — a feature of the comparison, not a defect
+to paper over with a hybrid.

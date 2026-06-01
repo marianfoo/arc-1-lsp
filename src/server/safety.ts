@@ -5,6 +5,8 @@
  */
 export interface WriteSafety {
   allowWrites: boolean;
+  /** Allow CTS transport mutations (create_transport). Also requires allowWrites. */
+  allowTransportWrites: boolean;
   allowedPackages: string[];
 }
 
@@ -21,11 +23,22 @@ export function isPackageAllowed(allowed: string[], pkg: string): boolean {
 
 /**
  * Throw a clear error if a mutating action isn't permitted. `packageName` is
- * checked against the allowlist when supplied (e.g. on create).
+ * checked against the allowlist when supplied (e.g. on create). When
+ * `requireTransportWrites` is set, `allowTransportWrites` must also be enabled
+ * (CTS mutations — mirrors arc-1's `SAP_ALLOW_TRANSPORT_WRITES`, which likewise
+ * layers on top of `allowWrites`).
  */
-export function assertWriteAllowed(safety: WriteSafety, opts: { action: string; packageName?: string }): void {
+export function assertWriteAllowed(
+  safety: WriteSafety,
+  opts: { action: string; packageName?: string; requireTransportWrites?: boolean },
+): void {
   if (!safety.allowWrites) {
     throw new Error(`Writes are disabled (read-only mode). Set ARC1_ALLOW_WRITES=true to enable ${opts.action}.`);
+  }
+  if (opts.requireTransportWrites && !safety.allowTransportWrites) {
+    throw new Error(
+      `Transport writes are disabled. Set ARC1_ALLOW_TRANSPORT_WRITES=true (also requires ARC1_ALLOW_WRITES=true) to enable ${opts.action}.`,
+    );
   }
   if (opts.packageName && !isPackageAllowed(safety.allowedPackages, opts.packageName)) {
     throw new Error(

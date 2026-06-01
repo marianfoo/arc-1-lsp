@@ -6,8 +6,9 @@ development — that delegates **all** ABAP/ADT interaction to SAP's own embedde
 owns the MCP front-end, auth/scopes, write-safety, and orchestration; `adt-ls`
 owns CSRF, locking, XML, activation, transport — everything system-specific.
 
-> **Status:** working — connects headless to a SAP system, exposes 16 MCP tools
-> (reads + a full create→edit→activate→test→delete authoring loop), runs locally
+> **Status:** working — connects headless to a SAP system, exposes 21 MCP tools
+> (reads + a full create→edit→activate→test→delete authoring loop + RAP generation
+> and transport), runs locally
 > over stdio or as a Docker app on SAP BTP Cloud Foundry. Single-tenant / one
 > technical user today; per-user principal propagation is on the roadmap.
 
@@ -53,23 +54,29 @@ capability boundary of `adt-ls` itself is in
 
 ## What works today
 
-**16 MCP tools.** Reads work read-only; the authoring loop is gated behind
-`ARC1_ALLOW_WRITES` + a package allowlist.
+**21 MCP tools.** Reads work read-only; mutating tools are gated behind
+`ARC1_ALLOW_WRITES` + a package allowlist (transport creation additionally needs
+`ARC1_ALLOW_TRANSPORT_WRITES`).
 
-- **Reads (11):** `health`, `list_destinations`, `list_creatable_objects`,
+- **Reads (14):** `health`, `list_destinations`, `list_creatable_objects`,
   `search_objects`, `list_inactive_objects`, `list_users`, `list_generators`,
   `get_generator_schema`, `get_object_type_details`, `get_service_binding`,
-  `read_source`.
+  `get_service_details`, `read_source`, `validate_object`, `find_transport`.
 - **Authoring loop (5, write-gated):** `create_object`, `update_source`,
   `activate_object`, `run_unit_tests`, `delete_object` — a full
   create → edit → activate → test → delete cycle, by object name, for modern
   ABAP-Cloud types. `activate_object` returns ranged syntax diagnostics so an
   agent can self-correct.
+- **Generation + transport (2, gated):** `generate_objects` runs a RAP generator
+  (scaffolds a full table/CDS/behavior/service set); `create_transport` opens a
+  CTS transport request. For transportable (non-`$TMP`) packages the flow is
+  `validate_object` → `find_transport` → (`create_transport`) →
+  `create_object`/`generate_objects` (pass the TR as `transport`).
 
 **Out of scope here (use main ARC-1):** classic object types (program/table/
 function group/domain/…), free SQL, navigation/where-used, ATC/lint, transport
-*writes*, and git. These are honest limits of `adt-ls`'s headless surface, not
-missing features — details in [`docs/arc-1-feature-parity.md`](docs/arc-1-feature-parity.md).
+*release/delete*, and git. These are honest limits of `adt-ls`'s headless surface,
+not missing features — details in [`docs/arc-1-feature-parity.md`](docs/arc-1-feature-parity.md).
 
 The SAP session behind `adt-ls` self-heals: if it expires (idle timeout →
 "logged off"), arc-1-lsp transparently re-logs on and retries the call once.
@@ -205,7 +212,8 @@ process instead of a URL. GUI inspector: `npx @modelcontextprotocol/inspector`.
 | `ARC1_TRANSPORT` / `--transport` | `stdio` | `stdio` \| `http-streamable` |
 | `ARC1_PORT` / `--port` | `8080` | HTTP port (http-streamable; CF `$PORT` honored) |
 | `ARC1_API_KEYS` / `--api-keys` | (none) | edge auth: `key[:label][,key2…]`; empty disables auth (local only) |
-| `ARC1_ALLOW_WRITES` / `--allow-writes` | `false` | enable mutating tools (create/update/activate/delete) |
+| `ARC1_ALLOW_WRITES` / `--allow-writes` | `false` | enable mutating tools (create/update/activate/delete/generate) |
+| `ARC1_ALLOW_TRANSPORT_WRITES` / `--allow-transport-writes` | `false` | enable CTS transport creation (`create_transport`) — also requires `ARC1_ALLOW_WRITES` |
 | `ARC1_ALLOWED_PACKAGES` / `--allowed-packages` | `$TMP` | packages writes may target — exact / `PREFIX*` / `*` |
 | `ARC1_LOG_LEVEL` | `info` | `debug`\|`info`\|`warn`\|`error` (stderr only) |
 | **SAP connection — DIRECT mode** (internet-reachable backend) | | |
@@ -277,7 +285,8 @@ guide (design principles, codebase map, conventions).
 ## Status & roadmap
 
 ✅ foundation → ✅ containerize → ✅ deploy to BTP CF → ✅ headless connect
-(DIRECT) → ✅ read + authoring-loop tools (16) → ✅ session self-heal.
+(DIRECT) → ✅ read + authoring-loop + generation/transport tools (21) →
+✅ session self-heal.
 
 **Next:** CC-mode deploy (code ready; needs a running Cloud Connector + bound
 `connectivity`/`destination`), then **per-user principal propagation** (one

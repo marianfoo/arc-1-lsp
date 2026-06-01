@@ -6,7 +6,7 @@ import type { WriteSafety } from '../../../src/server/safety.js';
 const AFF =
   'abap:/repotree-v1/A4H/Local%20Objects%20%28%24TMP%29/DEVELOPER/Source%20Code%20Library/Classes/ZCL_X/zcl_x.clas.abap';
 
-function fakes(opts: { readContent?: string } = {}) {
+function fakes(opts: { readContent?: string; errorOn?: string } = {}) {
   const lsp: Array<{ method: string; params: unknown }> = [];
   const fed: Array<{ name: string; args: Record<string, unknown> }> = [];
   const driver = {
@@ -26,18 +26,26 @@ function fakes(opts: { readContent?: string } = {}) {
   } as unknown as AdtLsDriver;
   const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
     fed.push({ name, args });
+    if (opts.errorOn && name === opts.errorOn) return { isError: true, content: [{ text: 'boom' }] };
     if (name === 'abap_creation-create_object')
       return { structuredContent: { message: 'ABAP Class created successfully', filePath: AFF }, isError: false };
     if (name === 'abap_activate_objects')
       return { structuredContent: { success: true, objectDiagnostics: [] }, isError: false };
     if (name === 'abap_run_unit_tests') return { content: [{ text: 'No tests found' }], isError: false };
+    if (name === 'abap_generators-generate_objects')
+      return { structuredContent: { generatedObjects: ['ZI_X'] }, isError: false };
+    if (name === 'abap_creation-run_validation') return { structuredContent: { valid: true }, isError: false };
+    if (name === 'abap_transport-get') return { structuredContent: { transports: [] }, isError: false };
+    if (name === 'abap_transport-create')
+      return { structuredContent: { transportRequestNumber: 'A4HK900123' }, isError: false };
     return {};
   });
   const make = (safety: WriteSafety) => createLifecycle({ driver, callTool, destination: () => 'A4H', safety });
   return { make, lsp, fed, driver, callTool };
 }
-const WRITES_OFF: WriteSafety = { allowWrites: false, allowedPackages: ['$TMP'] };
-const WRITES_ON: WriteSafety = { allowWrites: true, allowedPackages: ['$TMP'] };
+const WRITES_OFF: WriteSafety = { allowWrites: false, allowTransportWrites: false, allowedPackages: ['$TMP'] };
+const WRITES_ON: WriteSafety = { allowWrites: true, allowTransportWrites: false, allowedPackages: ['$TMP'] };
+const TRANSPORT_ON: WriteSafety = { allowWrites: true, allowTransportWrites: true, allowedPackages: ['*'] };
 
 describe('lifecycle.resolveAffUri', () => {
   it('searches by name+type then getLsUri with adtUri → repotree URI', async () => {
@@ -104,6 +112,25 @@ describe('lifecycle write-safety', () => {
       description: 'x',
     });
   });
+  it('createObject sends transportRequestNumber as a top-level arg (default "", explicit forwarded)', async () => {
+    const f = fakes();
+    await f
+      .make(WRITES_ON)
+      .createObject({ objectType: 'CLAS/OC', name: 'ZCL_X', packageName: '$TMP', description: 'x' });
+    expect(f.fed.find((c) => c.name === 'abap_creation-create_object')?.args.transportRequestNumber).toBe('');
+
+    const f2 = fakes();
+    await f2.make(WRITES_ON).createObject({
+      objectType: 'CLAS/OC',
+      name: 'ZCL_X',
+      packageName: '$TMP',
+      description: 'x',
+      transportRequestNumber: 'A4HK900999',
+    });
+    expect(f2.fed.find((c) => c.name === 'abap_creation-create_object')?.args.transportRequestNumber).toBe(
+      'A4HK900999',
+    );
+  });
   it('updateSource is gated + writes to the resolved URI', async () => {
     const f = fakes();
     await expect(
@@ -130,5 +157,126 @@ describe('lifecycle non-mutating', () => {
   it('runUnitTests works even with writes off (no gate)', async () => {
     const r = await fakes().make(WRITES_OFF).runUnitTests({ name: 'ZCL_X', objectType: 'CLAS/OC' });
     expect(JSON.stringify(r)).toContain('No tests found');
+  });
+  it('validateObject is ungated + sends objectContent JSON to run_validation', async () => {
+    const f = fakes();
+    await f
+      .make(WRITES_OFF)
+      .validateObject({ objectType: 'CLAS/OC', name: 'ZCL_X', packageName: '$TMP', description: 'x' });
+    const call = f.fed.find((c) => c.name === 'abap_creation-run_validation');
+    expect(call?.args.destination).toBe('A4H');
+    expect(call?.args.objectType).toBe('CLAS/OC');
+    expect(JSON.parse(call?.args.objectContent as string)).toEqual({
+      name: 'ZCL_X',
+      packageName: '$TMP',
+      description: 'x',
+    });
+  });
+  it('findTransport is ungated + sends object-scoped args to abap_transport-get', async () => {
+    const f = fakes();
+    await f
+      .make(WRITES_OFF)
+      .findTransport({ objectName: 'ZCL_X', objectType: 'CLAS/OC', developmentPackage: 'ZFOO', isCreation: true });
+    expect(f.fed.find((c) => c.name === 'abap_transport-get')?.args).toEqual({
+      destination: 'A4H',
+      objectName: 'ZCL_X',
+      objectType: 'CLAS/OC',
+      developmentPackage: 'ZFOO',
+      isCreation: true,
+    });
+  });
+});
+
+describe('lifecycle generation', () => {
+  it('generateObjects is gated by writes + package, then sends all args (refs/transport default "")', async () => {
+    const f = fakes();
+    await expect(
+      f.make(WRITES_OFF).generateObjects({ generatorId: 'x-ui-service', content: '{}', packageName: '$TMP' }),
+    ).rejects.toThrow(/Writes are disabled/);
+    await expect(
+      f.make(WRITES_ON).generateObjects({ generatorId: 'x-ui-service', content: '{}', packageName: 'ZPROD' }),
+    ).rejects.toThrow(/not in the write allowlist/);
+
+    const f2 = fakes();
+    await f2.make(WRITES_ON).generateObjects({
+      generatorId: 'x-ui-service',
+      content: '{"name":"X"}',
+      packageName: '$TMP',
+      referencedObjectType: 'TABL',
+      referencedObjectName: 'SCARR',
+    });
+    expect(f2.fed.find((c) => c.name === 'abap_generators-generate_objects')?.args).toEqual({
+      destination: 'A4H',
+      generatorId: 'x-ui-service',
+      content: '{"name":"X"}',
+      packageName: '$TMP',
+      transportRequestNumber: '',
+      referencedObjectType: 'TABL',
+      referencedObjectName: 'SCARR',
+    });
+  });
+  it('generateObjects throws when adt-ls signals isError', async () => {
+    const f = fakes({ errorOn: 'abap_generators-generate_objects' });
+    await expect(
+      f.make(WRITES_ON).generateObjects({ generatorId: 'x-ui-service', content: '{}', packageName: '$TMP' }),
+    ).rejects.toThrow(/generate_objects failed: boom/);
+  });
+});
+
+describe('lifecycle transport writes', () => {
+  it('createTransport needs writes AND transport-writes, then calls abap_transport-create', async () => {
+    await expect(
+      fakes()
+        .make(WRITES_OFF)
+        .createTransport({ developmentPackage: 'ZFOO', transportDescription: 'd', isCreation: true }),
+    ).rejects.toThrow(/Writes are disabled/);
+    await expect(
+      fakes()
+        .make(WRITES_ON)
+        .createTransport({ developmentPackage: 'ZFOO', transportDescription: 'd', isCreation: true }),
+    ).rejects.toThrow(/Transport writes are disabled/);
+
+    const f = fakes();
+    const r = await f.make(TRANSPORT_ON).createTransport({
+      developmentPackage: 'ZFOO',
+      transportDescription: 'My change',
+      isCreation: true,
+      objectName: 'ZCL_X',
+      objectType: 'CLAS/OC',
+    });
+    expect(JSON.stringify(r)).toContain('A4HK900123');
+    expect(f.fed.find((c) => c.name === 'abap_transport-create')?.args).toEqual({
+      destination: 'A4H',
+      developmentPackage: 'ZFOO',
+      transportDescription: 'My change',
+      isCreation: true,
+      objectName: 'ZCL_X',
+      objectType: 'CLAS/OC',
+    });
+  });
+  it('createTransport omits optional object args when not given', async () => {
+    const f = fakes();
+    await f
+      .make(TRANSPORT_ON)
+      .createTransport({ developmentPackage: 'ZFOO', transportDescription: 'd', isCreation: false });
+    expect(f.fed.find((c) => c.name === 'abap_transport-create')?.args).toEqual({
+      destination: 'A4H',
+      developmentPackage: 'ZFOO',
+      transportDescription: 'd',
+      isCreation: false,
+    });
+  });
+  it('createTransport runs developmentPackage through the package allowlist', async () => {
+    await expect(
+      fakes()
+        .make({ allowWrites: true, allowTransportWrites: true, allowedPackages: ['$TMP'] })
+        .createTransport({ developmentPackage: 'ZPROD', transportDescription: 'd', isCreation: true }),
+    ).rejects.toThrow(/not in the write allowlist/);
+  });
+  it('createTransport throws when adt-ls signals isError', async () => {
+    const f = fakes({ errorOn: 'abap_transport-create' });
+    await expect(
+      f.make(TRANSPORT_ON).createTransport({ developmentPackage: 'ZFOO', transportDescription: 'd', isCreation: true }),
+    ).rejects.toThrow(/create_transport failed: boom/);
   });
 });

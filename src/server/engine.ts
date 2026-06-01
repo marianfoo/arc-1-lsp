@@ -185,7 +185,11 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     driver: sessionRequester,
     callTool: sessionCallTool,
     destination: () => connectedDestination,
-    safety: { allowWrites: config.allowWrites, allowedPackages: config.allowedPackages },
+    safety: {
+      allowWrites: config.allowWrites,
+      allowTransportWrites: config.allowTransportWrites,
+      allowedPackages: config.allowedPackages,
+    },
   });
 
   const engine: Engine = {
