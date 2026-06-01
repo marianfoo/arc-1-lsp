@@ -292,6 +292,7 @@ ARC1_URL=https://<host>/mcp ARC1_KEY=<api-key> bash scripts/smoke-remote.sh
 |-----|----------------|
 | [`docs/adt-ls-reference.md`](docs/adt-ls-reference.md) | **The authoritative, live-verified `adt-ls` capability map** — URI model, the `getLsUri` name→URI resolver, the method/tool matrix, the object-type boundary, the proven lifecycle, session self-heal, gotchas |
 | [`docs/arc-1-feature-parity.md`](docs/arc-1-feature-parity.md) | arc-1 vs arc-1-lsp coverage, per-capability "implemented? why / why not" |
+| [`docs/research/whats-left-on-sap.md`](docs/research/whats-left-on-sap.md) | **The full adt-ls capability landscape** — code-grounded inventory of all ~80 `adtLs/*` methods + standard LSP: what's wired, what's reachable-but-unwired (coverage, business-service publish, richer transport, ATC, run, …), and what's genuinely blocked on SAP |
 | [`docs/adt-ls-headless-notes.md`](docs/adt-ls-headless-notes.md) | The reverse-engineered headless connection recipe (initialize, reentrance-ticket logon, TLS/truststore) |
 | [`docs/adr/`](docs/adr/README.md) | Architecture Decision Records — each decision, its context, and **when to revisit** it |
 | [`docs/assumptions-and-future-changes.md`](docs/assumptions-and-future-changes.md) | The watch-list: what to re-verify against new `adt-ls` releases, and what would let us delete complexity |
