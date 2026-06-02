@@ -64,12 +64,16 @@ export const TOOL_SCOPES: Record<string, Scope | null> = {
   run_atc: 'read',
   list_atc_variants: 'read',
   run_unit_tests_with_coverage: 'read',
+  // runtime & business services
+  run_application: 'read', // executes ABAP (like run_unit_tests); SAP-side auth is the real gate
+  service_binding_details: 'read',
   // writes
   create_object: 'write',
   update_source: 'write',
   activate_object: 'write',
   delete_object: 'write',
   generate_objects: 'write',
+  publish_service_binding: 'write',
   // transport
   create_transport: 'transport',
 };

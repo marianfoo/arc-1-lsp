@@ -43,6 +43,11 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
       listAtcVariants: async () => ({ checkVariants: {} }),
       runUnitTestsWithCoverage: async () => ({ status: null, result: null, coverage: null }),
     },
+    services: {
+      runApplication: async () => ({ output: 'ran' }),
+      serviceBindingDetails: async () => ({ serviceBindingName: 'Z_BIND', odataversion: 'V4' }),
+      publishServiceBinding: async () => ({ isExecuted: true, isPublishSuccess: true }),
+    },
     reconnect: async () => true,
     dispose: async () => {},
     ...overrides,
@@ -87,11 +92,14 @@ describe('createMcpServer', () => {
       'list_generators',
       'list_inactive_objects',
       'list_users',
+      'publish_service_binding',
       'read_source',
+      'run_application',
       'run_atc',
       'run_unit_tests',
       'run_unit_tests_with_coverage',
       'search_objects',
+      'service_binding_details',
       'type_hierarchy',
       'update_source',
       'validate_object',
@@ -657,6 +665,58 @@ describe('createMcpServer', () => {
     expect(variantArgs).toEqual({ query: 'c' });
     expect(coverageRef).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC' });
     expect(JSON.stringify(cov.content)).toContain('coverage');
+  });
+
+  it('run_application + service_binding tools delegate to engine.services', async () => {
+    let runRef: unknown;
+    let detailsRef: unknown;
+    let publishRef: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        services: {
+          ...fakeEngine().services,
+          runApplication: async (ref: unknown) => {
+            runRef = ref;
+            return { output: 'Hello 42' };
+          },
+          serviceBindingDetails: async (ref: unknown) => {
+            detailsRef = ref;
+            return { serviceBindingName: 'Z_BIND' };
+          },
+          publishServiceBinding: async (ref: unknown) => {
+            publishRef = ref;
+            return { isExecuted: true, isPublishSuccess: true };
+          },
+        },
+      }),
+    );
+    const run = await client.callTool({
+      name: 'run_application',
+      arguments: { name: 'Z_RUN', objectType: 'CLAS/OC' },
+    });
+    await client.callTool({ name: 'service_binding_details', arguments: { name: 'Z_BIND' } });
+    await client.callTool({ name: 'publish_service_binding', arguments: { name: 'Z_BIND' } });
+    expect(runRef).toEqual({ name: 'Z_RUN', objectType: 'CLAS/OC' });
+    expect(JSON.stringify(run.content)).toContain('Hello 42');
+    // srvb tools hardcode the SRVB/SVB type so callers only pass the binding name
+    expect(detailsRef).toEqual({ name: 'Z_BIND', objectType: 'SRVB/SVB' });
+    expect(publishRef).toEqual({ name: 'Z_BIND', objectType: 'SRVB/SVB' });
+  });
+
+  it('publish_service_binding surfaces a read-only safety error', async () => {
+    const client = await linkedClient(
+      fakeEngine({
+        services: {
+          ...fakeEngine().services,
+          publishServiceBinding: async () => {
+            throw new Error('Writes are disabled (read-only mode).');
+          },
+        },
+      }),
+    );
+    const res = await client.callTool({ name: 'publish_service_binding', arguments: { name: 'Z_BIND' } });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toContain('Writes are disabled');
   });
 
   it('type_hierarchy forwards the direction option', async () => {

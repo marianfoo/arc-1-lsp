@@ -581,5 +581,36 @@ export function createMcpServer(engine: Engine): McpServer {
     async ({ name, objectType: t }) => text(await engine.quality.runUnitTestsWithCoverage({ name, objectType: t })),
   );
 
+  // ── Runtime & business services (pure adt-ls) ──
+  server.registerTool(
+    'run_application',
+    {
+      description:
+        'Run an executable ABAP object and return its console output — a class implementing if_oo_adt_classrun (the "ABAP Application (Console)" run target) or an executable program. Executes ABAP (governed by your SAP authorizations); the object must support console run, else adt-ls reports it is not supported.',
+      inputSchema: { name: z.string(), objectType },
+    },
+    async ({ name, objectType: t }) => text(await engine.services.runApplication({ name, objectType: t })),
+  );
+
+  server.registerTool(
+    'service_binding_details',
+    {
+      description:
+        'Read a service binding (SRVB) via the native srvb segment: binding type, OData version, the bound services, and full object data. Read-only. (Complements get_service_binding with native object data.)',
+      inputSchema: { name: z.string().describe('Service binding name, e.g. "/DMO/API_TRAVEL_U_V2".') },
+    },
+    async ({ name }) => text(await engine.services.serviceBindingDetails({ name, objectType: 'SRVB/SVB' })),
+  );
+
+  server.registerTool(
+    'publish_service_binding',
+    {
+      description:
+        'Publish (or unpublish) a service binding — makes its OData service live (mutating — requires ARC1_ALLOW_WRITES). adt-ls TOGGLES based on the current published state, so calling it on a published binding unpublishes it. Returns {isExecuted, isPublishSuccess, statusMessage}.',
+      inputSchema: { name: z.string().describe('Service binding name, e.g. "/DMO/API_TRAVEL_U_V2".') },
+    },
+    async ({ name }) => text(await engine.services.publishServiceBinding({ name, objectType: 'SRVB/SVB' })),
+  );
+
   return server;
 }

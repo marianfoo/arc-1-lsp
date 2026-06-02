@@ -33,6 +33,7 @@ import { setMcpDestination, startMcpServer, stopMcpServer } from '../adt-ls/mcp-
 import { type Navigation, createNavigation } from '../adt-ls/navigation.js';
 import { type Quality, createQuality } from '../adt-ls/quality.js';
 import { type SearchReference, type UserRef, getInactiveObjects, getUsers, quickSearch } from '../adt-ls/repository.js';
+import { type Services, createServices } from '../adt-ls/services.js';
 import { isLoggedOffFederatedResult, makeRelogon, makeWithRelogon } from '../adt-ls/session-retry.js';
 import { type TlsReverseProxy, startTlsReverseProxy } from '../adt-ls/tls-reverse-proxy.js';
 import { type ConnectivityBridge, startConnectivityBridge } from '../btp/bridge.js';
@@ -69,6 +70,8 @@ export interface Engine {
   navigation: Navigation;
   /** Quality & test: ATC static analysis, ABAP Unit code coverage. */
   quality: Quality;
+  /** Runtime & business services: run application (console), service-binding details/publish. */
+  services: Services;
   /** The destination logged on at startup, if any. */
   connectedDestination?: string;
   /**
@@ -197,18 +200,20 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     sendNotification: (method: string, params?: unknown) => driver.sendNotification(method, params),
   };
 
+  const safety = {
+    allowWrites: config.allowWrites,
+    allowTransportWrites: config.allowTransportWrites,
+    allowedPackages: config.allowedPackages,
+  };
   const lifecycle = createLifecycle({
     driver: sessionRequester,
     callTool: sessionCallTool,
     destination: () => connectedDestination,
-    safety: {
-      allowWrites: config.allowWrites,
-      allowTransportWrites: config.allowTransportWrites,
-      allowedPackages: config.allowedPackages,
-    },
+    safety,
   });
   const navigation = createNavigation({ lsp, lifecycle });
   const quality = createQuality({ lsp, lifecycle });
+  const services = createServices({ lsp, lifecycle, safety });
 
   const engine: Engine = {
     connectedDestination,
@@ -216,6 +221,7 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     lsp,
     navigation,
     quality,
+    services,
     health: () => ({
       adtLs: { name: init.serverInfo?.name, version: init.serverInfo?.version, up: true },
       mcpPort: started.port,
