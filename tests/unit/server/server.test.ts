@@ -31,6 +31,9 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
       documentSymbols: async () => [{ name: 'ZCL_X', kind: 5 }],
       checkSyntax: async () => ({ kind: 'full', items: [] }),
       goToDefinition: async () => [{ targetUri: 'abap:/x' }],
+      goToDeclaration: async () => [{ targetUri: 'abap:/x' }],
+      hover: async () => ({ contents: { kind: 'markdown', value: 'METHOD run' } }),
+      documentHighlight: async () => [{ range: {}, kind: 1 }],
       findReferences: async () => [{ uri: 'abap:/x' }],
       typeHierarchy: async () => ({ item: { name: 'ZCL_X' }, supertypes: [], subtypes: [] }),
       completion: async () => ({ isIncomplete: false, total: 0, items: [] }),
@@ -60,6 +63,7 @@ describe('createMcpServer', () => {
       'create_object',
       'create_transport',
       'delete_object',
+      'document_highlight',
       'document_symbols',
       'find_references',
       'find_transport',
@@ -68,8 +72,10 @@ describe('createMcpServer', () => {
       'get_object_type_details',
       'get_service_binding',
       'get_service_details',
+      'go_to_declaration',
       'go_to_definition',
       'health',
+      'hover',
       'list_creatable_objects',
       'list_destinations',
       'list_generators',
@@ -538,6 +544,58 @@ describe('createMcpServer', () => {
     });
     expect(got.ref).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC' });
     expect(got.loc).toEqual({ symbol: 'RUN', line: undefined, character: undefined });
+  });
+
+  it('hover passes the object ref + locator to navigation.hover', async () => {
+    let got: { ref?: unknown; loc?: unknown } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        navigation: {
+          ...fakeEngine().navigation,
+          hover: async (ref: unknown, loc: unknown) => {
+            got = { ref, loc };
+            return { contents: { kind: 'markdown', value: 'METHOD run' } };
+          },
+        },
+      }),
+    );
+    const res = await client.callTool({
+      name: 'hover',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', symbol: 'RUN' },
+    });
+    expect(got.ref).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC' });
+    expect(got.loc).toEqual({ symbol: 'RUN', line: undefined, character: undefined });
+    expect(JSON.stringify(res.content)).toContain('METHOD run');
+  });
+
+  it('document_highlight + go_to_declaration delegate to navigation', async () => {
+    let highlightLoc: unknown;
+    let declLoc: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        navigation: {
+          ...fakeEngine().navigation,
+          documentHighlight: async (_ref: unknown, loc: unknown) => {
+            highlightLoc = loc;
+            return [{ range: {}, kind: 2 }];
+          },
+          goToDeclaration: async (_ref: unknown, loc: unknown) => {
+            declLoc = loc;
+            return [{ targetUri: 'abap:/x' }];
+          },
+        },
+      }),
+    );
+    await client.callTool({
+      name: 'document_highlight',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', line: 4, character: 7 },
+    });
+    await client.callTool({
+      name: 'go_to_declaration',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', symbol: 'RUN' },
+    });
+    expect(highlightLoc).toEqual({ symbol: undefined, line: 4, character: 7 });
+    expect(declLoc).toEqual({ symbol: 'RUN', line: undefined, character: undefined });
   });
 
   it('type_hierarchy forwards the direction option', async () => {

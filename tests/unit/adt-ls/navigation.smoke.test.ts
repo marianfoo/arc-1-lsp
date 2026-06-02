@@ -51,6 +51,23 @@ describe('navigation / code-intelligence (needs adt-ls + ARC1_TEST_SAP_PASSWORD)
         subtypes?: unknown;
       };
       expect(JSON.stringify(th.subtypes)).toMatch(/CL_ABAP_OBJECTDESCR/);
+
+      // HOVER — the headline fix (capability-map §3a): priming textDocument/semanticTokens/full
+      // populates AbapDocumentTokenCache so AbapTokenFilterService.shouldCallBackend passes.
+      // Without the prime this is null at every position. Expect rich markdown now.
+      const hover = (await nav.hover(ref, { symbol: 'CL_ABAP_TYPEDESCR' })) as {
+        contents?: { value?: string };
+      } | null;
+      expect(hover, 'hover must be non-null once semanticTokens primes the token cache').not.toBeNull();
+      expect(JSON.stringify(hover)).toMatch(/CL_ABAP_TYPEDESCR|class|interface/i);
+
+      // documentHighlight — same backend gate as hover; occurrences within the document.
+      const highlights = await nav.documentHighlight(ref, { symbol: 'CL_ABAP_TYPEDESCR' });
+      expect(Array.isArray(highlights)).toBe(true);
+
+      // declaration — LocationLink[] (no priming needed).
+      const decl = await nav.goToDeclaration(ref, { symbol: 'CL_ABAP_TYPEDESCR' });
+      expect(Array.isArray(decl) && (decl as unknown[]).length > 0).toBe(true);
     },
     180000,
   );

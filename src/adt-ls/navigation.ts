@@ -106,6 +106,20 @@ export function createNavigation(deps: NavigationDeps) {
     return m ? { line: start.line, character: m.index } : start;
   }
 
+  /**
+   * Prime the ABAP token cache so hover/documentHighlight pass the backend gate.
+   * adt-ls's `AbapLsHoverService`/`AbapLsDocumentHighlightService` short-circuit to
+   * null/[] at `AbapTokenFilterService.shouldCallBackend`, which requires the token
+   * under the cursor to be in `AbapDocumentTokenCache` — and that cache is populated
+   * ONLY as a side-effect of `textDocument/semanticTokens/full` (at the same document
+   * version). Without this, ABAP hover is unconditionally null. Best-effort: errors are
+   * swallowed (DDLS/JSON hover parse inline and don't need priming; the query just
+   * degrades to its un-primed result). See docs/research/adt-ls-capability-map.md §3a.
+   */
+  async function primeTokens(uri: string): Promise<void> {
+    await lsp.sendRequest('textDocument/semanticTokens/full', { textDocument: { uri } }).catch(() => {});
+  }
+
   /** Resolve a locator → 0-based LSP position. Doc must already be open (symbol lookup). */
   async function resolvePosition(uri: string, content: string, locator: Locator): Promise<Position> {
     if (locator.line !== undefined && locator.character !== undefined) {
@@ -141,6 +155,37 @@ export function createNavigation(deps: NavigationDeps) {
       return withOpenDocument(ref, async (uri, content) => {
         const position = await resolvePosition(uri, content, locator);
         return lsp.sendRequest('textDocument/definition', { textDocument: { uri }, position });
+      });
+    },
+
+    /** Jump to a symbol's declaration/signature (LocationLink[]). For ABAP this is the
+     * DEFINITION block (vs goToDefinition → the IMPLEMENTATION). No token-cache priming
+     * needed — navigation doesn't use the hover/highlight backend gate. */
+    goToDeclaration(ref: ObjectRef, locator: Locator): Promise<unknown> {
+      return withOpenDocument(ref, async (uri, content) => {
+        const position = await resolvePosition(uri, content, locator);
+        return lsp.sendRequest('textDocument/declaration', { textDocument: { uri }, position });
+      });
+    },
+
+    /** Hover info at a position — for ABAP a full signature + ABAP-Doc short text
+     * (rendered markdown), for CDS/DDLS the element info. Primes the token cache first
+     * (the ABAP backend gate); returns null when there's no element under the cursor. */
+    hover(ref: ObjectRef, locator: Locator): Promise<unknown> {
+      return withOpenDocument(ref, async (uri, content) => {
+        await primeTokens(uri);
+        const position = await resolvePosition(uri, content, locator);
+        return lsp.sendRequest('textDocument/hover', { textDocument: { uri }, position });
+      });
+    },
+
+    /** Occurrences of the symbol at a position within the document (DocumentHighlight[]
+     * — read/write/text kinds). Same token-cache gate as hover (primed first). */
+    documentHighlight(ref: ObjectRef, locator: Locator): Promise<unknown> {
+      return withOpenDocument(ref, async (uri, content) => {
+        await primeTokens(uri);
+        const position = await resolvePosition(uri, content, locator);
+        return lsp.sendRequest('textDocument/documentHighlight', { textDocument: { uri }, position });
       });
     },
 

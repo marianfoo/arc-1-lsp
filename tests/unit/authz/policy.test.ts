@@ -35,6 +35,9 @@ const ALL_TOOLS = [
   'document_symbols',
   'check_syntax',
   'go_to_definition',
+  'go_to_declaration',
+  'hover',
+  'document_highlight',
   'find_references',
   'type_hierarchy',
   'completion',
@@ -57,7 +60,7 @@ describe('expandScopes (admin ⊇ transport ⊇ write ⊇ read)', () => {
 });
 
 describe('TOOL_SCOPES', () => {
-  it('covers exactly the 27 registered tools (no tool silently un-scoped)', () => {
+  it('covers exactly the 30 registered tools (no tool silently un-scoped)', () => {
     expect(Object.keys(TOOL_SCOPES).sort()).toEqual([...ALL_TOOLS].sort());
   });
   it('LSP code-intelligence tools are read-scoped', () => {
@@ -65,6 +68,9 @@ describe('TOOL_SCOPES', () => {
       'document_symbols',
       'check_syntax',
       'go_to_definition',
+      'go_to_declaration',
+      'hover',
+      'document_highlight',
       'find_references',
       'type_hierarchy',
       'completion',

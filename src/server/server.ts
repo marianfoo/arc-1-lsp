@@ -507,5 +507,38 @@ export function createMcpServer(engine: Engine): McpServer {
       text(await engine.navigation.completion({ name, objectType: t }, { symbol, line, character }, { maxItems })),
   );
 
+  server.registerTool(
+    'go_to_declaration',
+    {
+      description:
+        "Resolve where a symbol is declared (LSP declaration). For ABAP this is the DEFINITION/signature site (vs go_to_definition → the implementation). Target a declared `symbol` by name, or pass 1-based `line`+`character`.",
+      inputSchema: { name: z.string(), objectType, symbol: symbolArg, line: lineArg, character: charArg },
+    },
+    async ({ name, objectType: t, symbol, line, character }) =>
+      text(await engine.navigation.goToDeclaration({ name, objectType: t }, { symbol, line, character })),
+  );
+
+  server.registerTool(
+    'hover',
+    {
+      description:
+        "Hover info for the symbol at a position (LSP hover): for ABAP a full method/class signature + ABAP-Doc short text as markdown; for CDS the element info. Target a declared `symbol` by name, or pass 1-based `line`+`character`. Returns null when there's nothing under the cursor.",
+      inputSchema: { name: z.string(), objectType, symbol: symbolArg, line: lineArg, character: charArg },
+    },
+    async ({ name, objectType: t, symbol, line, character }) =>
+      text(await engine.navigation.hover({ name, objectType: t }, { symbol, line, character })),
+  );
+
+  server.registerTool(
+    'document_highlight',
+    {
+      description:
+        'Highlight all occurrences of the symbol at a position within the same object (LSP documentHighlight) — each with a read/write/text kind. Target a declared `symbol` by name, or pass 1-based `line`+`character`.',
+      inputSchema: { name: z.string(), objectType, symbol: symbolArg, line: lineArg, character: charArg },
+    },
+    async ({ name, objectType: t, symbol, line, character }) =>
+      text(await engine.navigation.documentHighlight({ name, objectType: t }, { symbol, line, character })),
+  );
+
   return server;
 }

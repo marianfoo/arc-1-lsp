@@ -200,3 +200,50 @@ describe('navigation queries', () => {
     expect(r.items).toHaveLength(10);
   });
 });
+
+describe('navigation hover / documentHighlight (token-cache primed)', () => {
+  const HOVER = { contents: { kind: 'markdown', value: 'METHOD run' }, range: {} };
+
+  it('hover primes semanticTokens/full BEFORE querying hover, at the resolved position', async () => {
+    const f = fakes({ 'textDocument/hover': HOVER });
+    const r = await f.nav.hover(REF, { symbol: 'RUN' });
+    expect(r).toEqual(HOVER);
+    const order = f.reqs.map((x) => x.method);
+    const prime = order.indexOf('textDocument/semanticTokens/full');
+    const hover = order.indexOf('textDocument/hover');
+    expect(prime).toBeGreaterThanOrEqual(0); // primed
+    expect(prime).toBeLessThan(hover); // …before the hover query
+    expect(f.reqs.find((x) => x.method === 'textDocument/hover')?.params.position).toEqual({ line: 3, character: 12 });
+  });
+
+  it('hover still queries when token priming fails (best-effort, swallowed)', async () => {
+    const f = fakes({
+      'textDocument/semanticTokens/full': () => {
+        throw new Error('no tokens');
+      },
+      'textDocument/hover': HOVER,
+    });
+    expect(await f.nav.hover(REF, { symbol: 'RUN' })).toEqual(HOVER);
+    expect(f.notes.at(-1)?.method).toBe('textDocument/didClose'); // doc still cleaned up
+  });
+
+  it('documentHighlight primes then queries textDocument/documentHighlight', async () => {
+    const highlights = [{ range: {}, kind: 1 }];
+    const f = fakes({ 'textDocument/documentHighlight': highlights });
+    expect(await f.nav.documentHighlight(REF, { symbol: 'RUN' })).toEqual(highlights);
+    const order = f.reqs.map((x) => x.method);
+    expect(order.indexOf('textDocument/semanticTokens/full')).toBeLessThan(
+      order.indexOf('textDocument/documentHighlight'),
+    );
+  });
+
+  it('goToDeclaration queries textDocument/declaration WITHOUT priming tokens', async () => {
+    const f = fakes({ 'textDocument/declaration': [{ targetUri: AFF }] });
+    await f.nav.goToDeclaration(REF, { symbol: 'RUN' });
+    expect(f.reqs.some((x) => x.method === 'textDocument/semanticTokens/full')).toBe(false);
+    expect(f.reqs.find((x) => x.method === 'textDocument/declaration')?.params.position).toEqual({
+      line: 3,
+      character: 12,
+    });
+  });
+});
