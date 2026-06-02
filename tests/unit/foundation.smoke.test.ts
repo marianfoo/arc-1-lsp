@@ -36,7 +36,9 @@ describe('foundation smoke (full chain — needs a real adt-ls)', () => {
       const health = engine.health();
       expect(health.adtLs.up).toBe(true);
       expect(health.adtLs.name).toMatch(/ADTLS/i);
-      expect(health.mcpPort).toBe(2241);
+      // ≥ the configured start port — startMcpWithPortFallback bumps it when 2241 is
+      // already bound (e.g. other live smokes running concurrently).
+      expect(health.mcpPort).toBeGreaterThanOrEqual(2241);
 
       const tools = await engine.listTools();
       expect(tools.length).toBeGreaterThanOrEqual(14);

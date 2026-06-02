@@ -29,7 +29,12 @@ import { resolveAdtLsPath } from '../adt-ls/discovery.js';
 import { AdtLsDriver, type LspClient, type LspRequester } from '../adt-ls/driver.js';
 import { type Lifecycle, createLifecycle } from '../adt-ls/lifecycle.js';
 import { AdtLsMcpClient, type McpTool } from '../adt-ls/mcp-federation.js';
-import { setMcpDestination, startMcpServer, stopMcpServer } from '../adt-ls/mcp-lifecycle.js';
+import {
+  type StartMcpServerResult,
+  setMcpDestination,
+  startMcpServer,
+  stopMcpServer,
+} from '../adt-ls/mcp-lifecycle.js';
 import { type Navigation, createNavigation } from '../adt-ls/navigation.js';
 import { type Quality, createQuality } from '../adt-ls/quality.js';
 import { type SearchReference, type UserRef, getInactiveObjects, getUsers, quickSearch } from '../adt-ls/repository.js';
@@ -107,6 +112,34 @@ export function planConnection(config: Arc1LspConfig, btp: BTPConfig | null): Co
   return { mode: 'none' };
 }
 
+/**
+ * Start adt-ls's MCP server, falling back to the next port when the requested one is
+ * already bound — concurrent arc-1-lsp instances, a leftover bind, or parallel live
+ * tests all contend for the default port. Tries `attempts` consecutive ports; only a
+ * bind-failure is retried (any other error rethrows immediately). Injectable `start`
+ * (port → result) keeps it unit-testable. Returns the EFFECTIVE port adt-ls bound.
+ */
+export async function startMcpWithPortFallback(
+  start: (port: number) => Promise<StartMcpServerResult>,
+  startPort: number,
+  attempts = 20,
+  onRetry: (busyPort: number) => void = () => {},
+): Promise<StartMcpServerResult> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    const port = startPort + i;
+    try {
+      return await start(port);
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/failed to bind|address already in use|eaddrinuse/i.test(msg)) throw e;
+      onRetry(port);
+    }
+  }
+  throw lastErr;
+}
+
 export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   const bin = resolveAdtLsPath({ explicitPath: config.adtLsPath });
   logger.info(`engine: using adt-ls at ${bin}`);
@@ -132,7 +165,12 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   warnOnAdtLsVersionMismatch(init.serverInfo?.version, (m) => logger.warn(`engine: ${m}`));
 
   const token = config.adtLsMcpToken || crypto.randomBytes(24).toString('hex');
-  const started = await startMcpServer(driver, { port: config.adtLsMcpPort, token });
+  const started = await startMcpWithPortFallback(
+    (port) => startMcpServer(driver, { port, token }),
+    config.adtLsMcpPort,
+    20,
+    (busyPort) => logger.warn(`engine: adt-ls MCP port ${busyPort} busy — trying ${busyPort + 1}`),
+  );
   logger.info(`engine: adt-ls MCP server on http://localhost:${started.port}/mcp`);
 
   const federation = new AdtLsMcpClient(`http://localhost:${started.port}/mcp`, started.token);
