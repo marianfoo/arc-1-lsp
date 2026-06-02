@@ -127,16 +127,15 @@ describe('ALL MCP tools — live e2e (needs adt-ls + ARC1_TEST_SAP_PASSWORD)', (
       );
 
       // ── service-binding chain (read) ──
-      // Federated tools double-wrap: our handler JSON-stringifies the whole adt-ls MCP
-      // envelope, so the binding payload is in content[0].text (not the top level).
-      const sbEnv = (await call('get_service_binding', { serviceBindingName: '/DMO/API_TRAVEL_U_V2' })).json as {
-        content?: Array<{ text?: string }>;
-      };
-      const sb = JSON.parse(sbEnv.content?.[0]?.text ?? '{}') as {
+      // Federated reads now return the CLEAN payload (the doubly-wrapped envelope is
+      // unwrapped by the `federated()` helper), incl. odataVersion (which the lossy
+      // structuredContent omits — we prefer the full content text).
+      const sb = (await call('get_service_binding', { serviceBindingName: '/DMO/API_TRAVEL_U_V2' })).json as {
         odataVersion: string;
         odataInfoUri: Array<{ href: string }>;
         services: Array<{ name: string; content: Array<{ serviceDefinition: string; serviceVersion: string }> }>;
       };
+      expect(sb.odataVersion, 'unwrapped payload keeps odataVersion (not in structuredContent)').toBeTruthy();
       const svc = sb.services[0];
       await has(
         'get_service_details',

@@ -6,6 +6,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { parseFederated } from '../adt-ls/federated.js';
 import { VERSION } from '../version.js';
 import type { Engine } from './engine.js';
 
@@ -13,6 +14,23 @@ function text(value: unknown) {
   return {
     content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
   };
+}
+
+/**
+ * Unwrap a federated adt-ls tool result to its clean payload — vs returning the
+ * doubly-wrapped MCP envelope (`{content:[{text}],structuredContent,isError}`)
+ * verbatim. On a backend error, surface it as an MCP tool error so the agent sees a
+ * failure instead of a success-looking envelope.
+ */
+function federated(res: unknown) {
+  const { ok, data, text: t } = parseFederated(res);
+  if (!ok) {
+    return {
+      isError: true as const,
+      content: [{ type: 'text' as const, text: `adt-ls tool error: ${t || JSON.stringify(data)}` }],
+    };
+  }
+  return text(data);
 }
 
 export function createMcpServer(engine: Engine): McpServer {
@@ -34,7 +52,7 @@ export function createMcpServer(engine: Engine): McpServer {
       description: 'List the available ABAP system destinations, federated from the embedded adt-ls.',
       inputSchema: {},
     },
-    async () => text(await engine.callTool('abap_list_destinations', {})),
+    async () => federated(await engine.callTool('abap_list_destinations', {})),
   );
 
   server.registerTool(
@@ -56,7 +74,7 @@ export function createMcpServer(engine: Engine): McpServer {
           'No ABAP destination is connected. Configure ARC1_SAP_HOST/PORT/USER/PASSWORD, or pass `destination`.',
         );
       }
-      return text(await engine.callTool('abap_creation-get_all_creatable_objects', { destination: dest }));
+      return federated(await engine.callTool('abap_creation-get_all_creatable_objects', { destination: dest }));
     },
   );
 
@@ -120,7 +138,7 @@ export function createMcpServer(engine: Engine): McpServer {
     async () => {
       const dest = engine.connectedDestination;
       if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
-      return text(await engine.callTool('abap_generators-list_generators', { destination: dest }));
+      return federated(await engine.callTool('abap_generators-list_generators', { destination: dest }));
     },
   );
 
@@ -151,7 +169,7 @@ export function createMcpServer(engine: Engine): McpServer {
       if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
       // adt-ls's get_schema requires all of packageName + referencedObjectType + referencedObjectName
       // (the latter two may be ""); object-referencing generators (UI / Web-API service) need a real reference.
-      return text(
+      return federated(
         await engine.callTool('abap_generators-get_schema', {
           destination: dest,
           generatorId,
@@ -176,7 +194,7 @@ export function createMcpServer(engine: Engine): McpServer {
     async ({ objectType, name }) => {
       const dest = engine.connectedDestination;
       if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
-      return text(
+      return federated(
         await engine.callTool('abap_creation-get_object_type_details', {
           destination: dest,
           objectType,
@@ -198,7 +216,7 @@ export function createMcpServer(engine: Engine): McpServer {
     async ({ serviceBindingName }) => {
       const dest = engine.connectedDestination;
       if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
-      return text(
+      return federated(
         await engine.callTool('abap_business_services-fetch_services', { destination: dest, serviceBindingName }),
       );
     },
@@ -388,7 +406,7 @@ export function createMcpServer(engine: Engine): McpServer {
     async (args) => {
       const dest = engine.connectedDestination;
       if (!dest) return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
-      return text(
+      return federated(
         await engine.callTool('abap_business_services-fetch_service_information', { destination: dest, ...args }),
       );
     },

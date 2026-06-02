@@ -309,6 +309,40 @@ describe('createMcpServer', () => {
     });
   });
 
+  it('federated reads return the CLEAN payload (unwrapped), preferring full text over lossy structuredContent', async () => {
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        // a full adt-ls MCP envelope; structuredContent is LOSSY (omits odataVersion),
+        // the content text is complete — the unwrap must surface the full text payload.
+        callTool: async () => ({
+          content: [{ type: 'text', text: '{"bindingType":"ODATA","odataVersion":"V2","services":[{"name":"S"}]}' }],
+          structuredContent: { bindingType: 'ODATA', services: [{ name: 'S' }] },
+          isError: false,
+        }),
+      }),
+    );
+    const res = await client.callTool({ name: 'get_service_binding', arguments: { serviceBindingName: 'B' } });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    // the clean binding — NOT the doubly-wrapped envelope
+    expect(payload).toEqual({ bindingType: 'ODATA', odataVersion: 'V2', services: [{ name: 'S' }] });
+    expect(payload.content).toBeUndefined();
+    expect(payload.structuredContent).toBeUndefined();
+    expect(payload.odataVersion).toBe('V2'); // full text wins over the lossy structuredContent
+  });
+
+  it('a federated backend error (isError) surfaces as an MCP tool error', async () => {
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        callTool: async () => ({ content: [{ type: 'text', text: 'object not found' }], isError: true }),
+      }),
+    );
+    const res = await client.callTool({ name: 'get_service_binding', arguments: { serviceBindingName: 'NOPE' } });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toContain('object not found');
+  });
+
   it('read_source delegates to engine.lifecycle.readSource', async () => {
     let got: unknown;
     const client = await linkedClient(

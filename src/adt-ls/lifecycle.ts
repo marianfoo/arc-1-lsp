@@ -7,6 +7,7 @@ import { type WriteSafety, assertWriteAllowed } from '../server/safety.js';
  * See docs/adt-ls-reference.md.
  */
 import type { LspRequester } from './driver.js';
+import { parseFederated } from './federated.js';
 import {
   deleteFile,
   getLsUri,
@@ -38,24 +39,6 @@ export interface LifecycleDeps {
   /** The connected destination id, or undefined. */
   destination: () => string | undefined;
   safety: WriteSafety;
-}
-
-interface FederatedResult {
-  content?: Array<{ text?: string }>;
-  isError?: boolean;
-  structuredContent?: unknown;
-}
-
-/** Unwrap a federated MCP result → structuredContent, or parsed text, or raw text. */
-function parseFederated(res: unknown): { ok: boolean; data: unknown; text: string } {
-  const r = res as FederatedResult;
-  const text = r?.content?.[0]?.text ?? '';
-  if (r?.structuredContent !== undefined) return { ok: !r.isError, data: r.structuredContent, text };
-  try {
-    return { ok: !r?.isError, data: JSON.parse(text), text };
-  } catch {
-    return { ok: !r?.isError, data: text, text };
-  }
 }
 
 export function createLifecycle(deps: LifecycleDeps) {
