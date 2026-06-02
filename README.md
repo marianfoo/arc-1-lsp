@@ -90,8 +90,10 @@ capability boundary of `adt-ls` itself is in
   agent can self-correct.
 - **Generation + transport (5, gated):** `generate_objects` runs a RAP generator
   (scaffolds a full table/CDS/behavior/service set); `create_transport` opens a
-  CTS request; `assign_transport` pins an existing TR to an object; `list_transports`
-  + `get_lock_status` (reads). For transportable (non-`$TMP`) packages the flow is
+  CTS request; `assign_transport` pins an existing TR to an object (returns a
+  structured `{assigned, object, transport}`); `list_transports` (capped to `limit`,
+  default 100, with an optional `query` filter — the system can hold thousands of
+  requests) + `get_lock_status` (reads). For transportable (non-`$TMP`) packages the flow is
   `validate_object` → `find_transport` → (`create_transport`) →
   `create_object`/`generate_objects` (pass the TR as `transport`).
 
@@ -231,6 +233,11 @@ For local stdio, point the client at the `node dist/index.js` (or `arc1-lsp`)
 process instead of a URL. GUI inspector: `npx @modelcontextprotocol/inspector`.
 
 ## Configuration (precedence: CLI flag > env var > default)
+
+> **Env prefix is `ARC1_*`, not `SAP_*`.** The main ARC-1 server uses `SAP_*` vars;
+> arc-1-lsp uses `ARC1_*` (e.g. `ARC1_ALLOW_TRANSPORT_WRITES`, `ARC1_SAP_USER`). A
+> `SAP_*` var is **ignored** — arc-1-lsp logs a startup warning naming the `ARC1_*`
+> twin it expected so a migrated config doesn't silently lose a setting.
 
 | Env / flag | Default | Meaning |
 |------------|---------|---------|

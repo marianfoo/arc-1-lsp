@@ -79,7 +79,7 @@ create class → `readFile` returns its source → `activate` → `{success:true
 | **delete** — `fileSystem/delete` | ✅ | ✅ `delete_object` | deletes the `.clas.json`; gated |
 | lock / unlock — `fileSystem/{lockFile,unlockFile}` | ✅ | (internal) | adt-ls locks on write; not exposed as a tool |
 | validate creation — `abap_creation-run_validation` | ✅ | ✅ `validate_object` | pre-create check; same input as create |
-| **ATC** — `adtLs/atc/runCheck` | ✅ | ✅ `run_atc` | empty `checkVariant` → system default; `objectUri` = repotree AFF URI; busy-polls (60 s timeout). `list_atc_variants` needs a non-empty query (`*`). Live-verified — corrects the earlier "unreached" verdict. |
+| **ATC** — `adtLs/atc/runCheck` | ✅ | ✅ `run_atc` | empty `checkVariant` → system default; `objectUri` = repotree AFF URI; busy-polls (60 s timeout). `list_atc_variants` needs an anchor object (`name`+`objectType`) + a non-empty query (defaulted to `*`). Live-verified — corrects the earlier "unreached" verdict. |
 | **navigation** — `textDocument/{documentSymbol,definition,references,hover,…}` | ✅ | ✅ `document_symbols`/`go_to_definition`/`find_references`/`hover`/… | `didOpen` is a **notification** (the earlier "hangs" sent it as a request); hover/highlight need a `semanticTokens/full` prime. Live-verified. |
 | transport find — `abap_transport-get` | ✅ | ✅ `find_transport` | object-scoped TR lookup (read) |
 | transport create — `abap_transport-create` | ✅ | ✅ `create_transport` | CTS TR; gated by `allowTransportWrites` |
