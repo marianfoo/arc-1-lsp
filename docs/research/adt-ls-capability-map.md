@@ -318,7 +318,59 @@ value × effort × headless-reachability:
 
 ---
 
-## 7. What's genuinely blocked on SAP (much shorter now)
+## 7. Backend feature landscape & reachability (the other ~80 plugins)
+
+The `Adt-ls.app` Eclipse RCP bundles **~80 `com.sap.adt.*_3.58.x` feature plugins** behind
+the one LS plugin. Decompiling the reachability-relevant ones confirms an architectural
+invariant and surfaces what SAP *has* but doesn't expose headless.
+
+**Architectural invariant (verified):** `grep '@JsonSegment|@JsonRequest'` across
+`ideactions`, `refactoring(.model)`, `objectgenerator`, `atc.core`, `tools.classrun`
+returns **nothing**. Only `com.sap.adt.ls` declares JSON-RPC. **The `adtLs/*` + standard-LSP
+surface (§2, §4) is therefore the complete callable boundary** — every other plugin is an
+in-process backend the LS delegates to. arc-1-lsp cannot reach them except through an LS method.
+
+**The type boundary is a front-end choice, not a backend gap.** The backend ships full
+classic support — `ddic.{domain,dataelement,table,structure,tabletype,view,enqu,typegroup}`,
+`programs`, `functions`, `oo`, `messageclass`, `enho.model`/`enhs`, `textelements`,
+`setgetparameters`, `packages` — yet the LS `objectCreation`/`readFile` only serve the
+modern clean-core/RAP set (§4a). So the §4 "object-type boundary" is the LS front-end
+deliberately not wiring these backends, **not** an absence of capability. SAP *could*
+expose classic types headless later (watch-item).
+
+**IDE-Actions / AIA (`com.sap.adt.ideactions`) — the dynamic-MCP-tool engine.** Model:
+`IAction{getId,getTitle,getSummary,hasConfigurationStep,getUserInputConfiguration}`;
+`IActionManager` exposes a real **`performHeadless(...)`** path (→ `List<IActionResultContent>{uri,content}`)
+plus `getActionConfiguration` (the input schema) and `getAction`. `AiaBackendUtil.getEnabledActions(project,resources,monitor)`
+fetches the system's enabled actions over ADT REST (URI via `AiaUriDiscovery`, content
+types in `IContentTypes`). The MCP layer (`AdtMCPToolsIdeActionCollector`, §5) keeps those
+whose title starts with `MCP` and renames to `abap_*`. **The catalog is 100% backend-defined**
+— statically un-enumerable; it's whatever `MCP_*` AIA actions the connected S/4 ships. There
+is also AI-provenance plumbing here: `GenAICodeLogger.markAiGeneratedCode(...)` /
+`sourceCodePasted(...)` tag AI-written ABAP on the backend — relevant if arc-1-lsp wants to
+mark agent-generated code as such.
+
+**Refactoring (`com.sap.adt.refactoring` + `.model`) — present, NOT reachable headless.**
+ADT defines exactly four refactorings, each with a backend handler:
+`BackendRenameRefactoringHandler` (**Rename**), `BackendExtractMethodRefactoringHandler`
+(**Extract Method**, `ExtractMethodInfo`), **Extract CLIF** (extract class/interface —
+`ExtractClif*`, `ExtractInterfaceInfo`), and `ChangePackageRefactoringHandler` (**Change
+Package**). But they ride the Eclipse **LTK** UI framework (`AdtCompositeChange`,
+`AdtTextChange`, `AdtRefactoringDescriptor`) — there is **no `@JsonSegment("adtLs/refactoring")`**
+and the LSP `rename`/`codeAction` providers are **unadvertised** (§2). **So none of ADT's
+refactorings is reachable from a headless client today.** Exposing Rename/Extract would
+need SAP to advertise LSP `rename`/`codeAction` or add an `adtLs/refactoring` segment — a
+concrete, high-value ask (added to §9).
+
+**Run (`com.sap.adt.tools.classrun`) — confirms `adtLs/run/runApplication`.** Two discovery
+relations gate it: `http://www.sap.com/adt/relations/oo/classrun` (term `classrun`, for
+classes implementing `if_oo_adt_classrun`) and `…/programs/programrun` (term `programrun`,
+for executable programs). The object must expose the relation (else "not supported"); output
+is captured console text. Matches §4e.
+
+---
+
+## 8. What's genuinely blocked on SAP (much shorter now)
 
 1. **Standard-LSP "extras"** — `implementation`, `rename`, `codeAction`, `callHierarchy`,
    `workspace/symbol`, `signatureHelp` — **not advertised** → "Internal error" headless.
@@ -336,7 +388,7 @@ backend config (§3c).)
 
 ---
 
-## 8. Questions for SAP (Thomas Ritter) — refreshed
+## 9. Questions for SAP (Thomas Ritter) — refreshed
 
 1. **Hover/highlight**: we found the headless null is the `AbapDocumentTokenCache` gate
    (`AbapTokenFilterService.shouldCallBackend`) — primed only by `semanticTokens/full`. Is
@@ -354,6 +406,13 @@ backend config (§3c).)
 7. **MCP IDE-Action tools** (`AdtMCPToolsIdeActionCollector`): is the `MCP`-prefixed
    IDE-Action → `abap_*` tool mechanism a stable contract we can rely on, and what's the
    canonical list of `MCP_*` actions on S/4 Cloud?
+8. **Refactoring**: the backend has Rename / Extract Method / Extract CLIF / Change Package
+   (`com.sap.adt.refactoring`), but none is reachable headless (no `adtLs/refactoring`
+   segment; `rename`/`codeAction` unadvertised). Any plan to expose them — via LSP
+   `rename`/`codeAction` or a custom segment? **Rename especially is high-value for an agent.**
+9. **Classic object types**: the backend ships full DDIC/programs/functions/enhancement
+   plugins, but the LS only serves the clean-core/RAP set. Will the headless LS expose
+   classic-type read/create, or is that a permanent clean-core boundary?
 
 ---
 
@@ -397,6 +456,7 @@ documentHighlight, codeLens, semanticTokens(full); executeCommand (VS-Code-gated
 - Transport: `internal/transport/internal/{TransportCheckService,TransportCreationService,TransportAssignmentService,TransportSearchService}`, `transport/internal/solman/SolutionManagerService`, `transport/model/transport/Transport`.
 - SRVB/run: `internal/servicebinding/*`, `internal/applicationrun/*`.
 - MCP core: `src-mcp/com/sap/adt/mcp/core/server/ADTMCPServer`, `…/internal/util/{AdtMCPToolsRegistry,AdtMCPToolsExtensionCollector,AdtMCPToolsIdeActionCollector,ToolRegistrationService}`.
+- Backend plugins (§7, decompiled separately, *not* JSON-RPC endpoints): `com.sap.adt.ideactions` (`IAction`, `IActionManager.performHeadless`, `AiaBackendUtil.getEnabledActions`, `GenAICodeLogger`), `com.sap.adt.refactoring(.model)` (`Backend{Rename,ExtractMethod}RefactoringHandler`, `ExtractClif*`, `ChangePackageRefactoringHandler`), `com.sap.adt.tools.classrun` (`AbapApplicationConsoleRunService`, classrun/programrun discovery relations). The remaining ~75 `com.sap.adt.*_3.58.x` plugins are the in-process ADT backends (DDIC, CDS, programs, functions, oo, atc, abapunit, transport, ris, …) — full classic support exists but is unexposed by the LS front-end.
 
 (adt-ls `1.0.0.202605281240`; ADT feature plugins `3.58.x`. Re-extract per release — the
 startup version warning in `src/version.ts` flags drift.)
