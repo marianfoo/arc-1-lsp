@@ -199,6 +199,17 @@ describe('navigation queries', () => {
     expect(r.total).toBe(120);
     expect(r.items).toHaveLength(10);
   });
+  it('completion strips the opaque `data` blob from each item (token efficiency; resolve not exposed)', async () => {
+    const items = [
+      { label: 'double', kind: 2, data: { uri: 'x', big: 'blob'.repeat(100) } },
+      { label: 'foo', data: 42 },
+    ];
+    const f = fakes({ 'textDocument/completion': { isIncomplete: false, items } });
+    const r = (await f.nav.completion(REF, { symbol: 'RUN' })) as { items: Array<Record<string, unknown>> };
+    expect(r.items[0]).toEqual({ label: 'double', kind: 2 });
+    expect(r.items[0].data).toBeUndefined();
+    expect(r.items[1]).toEqual({ label: 'foo' });
+  });
 });
 
 describe('navigation hover / documentHighlight (token-cache primed)', () => {

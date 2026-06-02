@@ -38,10 +38,12 @@ describe('native transport + lock reads (needs adt-ls + ARC1_TEST_SAP_PASSWORD)'
       });
       engine = await startEngine(config);
 
-      // list MY modifiable transports — an array (possibly empty); proves the native
-      // searchTransports path (owner defaults to the logged-on user).
-      const transports = await engine.lifecycle.listTransports();
-      expect(Array.isArray(transports)).toBe(true);
+      // list MY modifiable transports — capped + shaped {total, returned, truncated,
+      // transports:[]}; proves the native searchTransports path (owner defaults to the
+      // logged-on user). transports is an array (possibly empty); returned ≤ 100.
+      const t = (await engine.lifecycle.listTransports()) as { returned: number; transports: unknown[] };
+      expect(Array.isArray(t.transports)).toBe(true);
+      expect(t.returned).toBeLessThanOrEqual(100);
 
       // lock status of a kernel class — {lockingSupported, lockId} (lockId null = unlocked).
       const lock = (await engine.lifecycle.getLockStatus({

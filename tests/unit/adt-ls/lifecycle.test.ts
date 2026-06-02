@@ -160,9 +160,10 @@ describe('lifecycle write-safety', () => {
 });
 
 describe('lifecycle non-mutating', () => {
-  it('runUnitTests works even with writes off (no gate)', async () => {
+  it('runUnitTests works even with writes off (no gate) + wraps a bare string into {message}', async () => {
     const r = await fakes().make(WRITES_OFF).runUnitTests({ name: 'ZCL_X', objectType: 'CLAS/OC' });
-    expect(JSON.stringify(r)).toContain('No tests found');
+    // adt-ls returns a bare "No tests found" string; normalized to a JSON object.
+    expect(r).toEqual({ message: 'No tests found' });
   });
   it('validateObject is ungated + sends objectContent JSON to run_validation', async () => {
     const f = fakes();
@@ -315,7 +316,24 @@ describe('lifecycle native transport + lock', () => {
     expect(f.lsp.find((c) => c.method === 'adtLs/fileSystem/getFileLockStatus')?.params).toEqual({ uri: AFF });
   });
 
-  it('assignTransport needs writes AND transport-writes, then sends objectUri + transport', async () => {
+  it('getLockStatus fills lockId:null even when adt-ls omits the key (unlocked)', async () => {
+    const driver = {
+      sendRequest: vi.fn(async (method: string) => {
+        if (method === 'adtLs/repository/quickSearch')
+          return { references: [{ name: 'ZCL_X', uri: '/sap/bc/adt/oo/classes/zcl_x' }] };
+        if (method === 'adtLs/repository/getLsUri') return { uri: AFF };
+        if (method === 'adtLs/fileSystem/getFileLockStatus') return { lockingSupported: true }; // no lockId key
+        return null;
+      }),
+    } as unknown as AdtLsDriver;
+    const life = createLifecycle({ driver, callTool: vi.fn(), destination: () => 'A4H', safety: WRITES_OFF });
+    expect(await life.getLockStatus({ name: 'ZCL_X', objectType: 'CLAS/OC' })).toEqual({
+      lockingSupported: true,
+      lockId: null,
+    });
+  });
+
+  it('assignTransport needs writes AND transport-writes, then sends objectUri + transport (structured result)', async () => {
     await expect(
       fakes().make(WRITES_OFF).assignTransport({ name: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' }),
     ).rejects.toThrow(/Writes are disabled/);
@@ -327,10 +345,62 @@ describe('lifecycle native transport + lock', () => {
     const r = await f
       .make(TRANSPORT_ON)
       .assignTransport({ name: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' });
-    expect(r).toBe(true);
+    // Wrapped, self-describing result — not a naked boolean.
+    expect(r).toEqual({ assigned: true, object: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' });
     expect(f.lsp.find((c) => c.method === 'adtLs/cts/transport/assignTransportToObject')?.params).toEqual({
       objectUri: AFF,
       transport: 'A4HK900123',
     });
+  });
+});
+
+describe('lifecycle.listTransports shaping (token-bomb guard)', () => {
+  function makeWith(transportsReply: unknown) {
+    const driver = {
+      sendRequest: vi.fn(async (method: string) =>
+        method === 'adtLs/cts/transport/searchTransports' ? transportsReply : null,
+      ),
+    } as unknown as AdtLsDriver;
+    return createLifecycle({ driver, callTool: vi.fn(), destination: () => 'A4H', safety: WRITES_OFF });
+  }
+  const rows = Array.from({ length: 250 }, (_, i) => ({
+    number: `A4HK${900000 + i}`,
+    description: i === 7 ? 'special wip' : `req ${i}`,
+    owner: 'DEVELOPER',
+  }));
+
+  it('caps to the default limit (100) and reports totals + truncated', async () => {
+    const r = (await makeWith(rows).listTransports()) as {
+      total: number;
+      returned: number;
+      truncated: boolean;
+      transports: unknown[];
+    };
+    expect(r.total).toBe(250);
+    expect(r.returned).toBe(100);
+    expect(r.truncated).toBe(true);
+    expect(r.transports).toHaveLength(100);
+  });
+
+  it('honors an explicit limit', async () => {
+    expect(((await makeWith(rows).listTransports({ limit: 5 })) as { returned: number }).returned).toBe(5);
+  });
+
+  it('filters client-side by query (case-insensitive substring across fields)', async () => {
+    const r = (await makeWith(rows).listTransports({ query: 'SPECIAL' })) as {
+      matched: number;
+      transports: Array<{ description: string }>;
+    };
+    expect(r.matched).toBe(1);
+    expect(r.transports[0].description).toBe('special wip');
+  });
+
+  it('normalizes a {transports:[...]} envelope', async () => {
+    expect(((await makeWith({ transports: rows.slice(0, 3) }).listTransports()) as { total: number }).total).toBe(3);
+  });
+
+  it('returns an unrecognized non-array shape verbatim (never hides data)', async () => {
+    const weird = { error: 'unexpected' };
+    expect(await makeWith(weird).listTransports()).toEqual(weird);
   });
 });

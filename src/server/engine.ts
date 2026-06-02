@@ -272,12 +272,11 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     },
     search: async (pattern, opts = {}) => {
       if (!connectedDestination) throw new Error('No ABAP destination is connected.');
-      const r = await quickSearch(sessionRequester, {
-        destination: connectedDestination,
-        pattern,
-        maxResults: opts.maxResults,
-        types: opts.types,
-      });
+      const r = await quickSearch(
+        sessionRequester,
+        { destination: connectedDestination, pattern, maxResults: opts.maxResults, types: opts.types },
+        { retryOnEmptyMs: 600 }, // cold-cache smoothing on the first search after connect
+      );
       return r.references ?? [];
     },
     listInactiveObjects: async () => {

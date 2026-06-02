@@ -22,17 +22,30 @@ export interface QuickSearchResult {
  * Repository object search (SAPSearch). NOTE the exact param names adt-ls wants:
  * the search string is `pattern` (NOT `query`) and `destination` (NOT
  * `destinationId`); `types` filters by object type (empty = all).
+ *
+ * `retryOnEmptyMs` (default 0 = off) smooths the cold repository index: the first
+ * query after a fresh connection often returns [] while adt-ls warms up. When set,
+ * an empty result is retried once after that delay. A genuinely-absent object pays
+ * one extra delay — an acceptable trade for not surfacing a spurious "not found".
  */
-export function quickSearch(
+export async function quickSearch(
   driver: LspRequester,
   params: { destination: string; pattern: string; maxResults?: number; types?: string[] },
+  opts: { retryOnEmptyMs?: number } = {},
 ): Promise<QuickSearchResult> {
-  return driver.sendRequest<QuickSearchResult>('adtLs/repository/quickSearch', {
-    destination: params.destination,
-    pattern: params.pattern,
-    maxResults: params.maxResults ?? 50,
-    types: params.types ?? [],
-  });
+  const run = () =>
+    driver.sendRequest<QuickSearchResult>('adtLs/repository/quickSearch', {
+      destination: params.destination,
+      pattern: params.pattern,
+      maxResults: params.maxResults ?? 50,
+      types: params.types ?? [],
+    });
+  let r = await run();
+  if ((r.references?.length ?? 0) === 0 && (opts.retryOnEmptyMs ?? 0) > 0) {
+    await new Promise((resolve) => setTimeout(resolve, opts.retryOnEmptyMs));
+    r = await run();
+  }
+  return r;
 }
 
 /** List inactive (draft) objects on a destination. Uses `destinationId`. */

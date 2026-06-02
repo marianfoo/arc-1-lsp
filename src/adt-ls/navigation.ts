@@ -265,7 +265,16 @@ export function createNavigation(deps: NavigationDeps) {
         );
         const items = Array.isArray(res) ? res : (res?.items ?? []);
         const isIncomplete = Array.isArray(res) ? undefined : res?.isIncomplete;
-        return { isIncomplete, total: items.length, items: items.slice(0, opts.maxItems ?? 50) };
+        // Drop each item's opaque `data` blob — it only feeds completionItem/resolve,
+        // which we don't expose, and it bloats the response (token-efficiency).
+        const slim = items.slice(0, opts.maxItems ?? 50).map((it) => {
+          if (it && typeof it === 'object' && 'data' in it) {
+            const { data: _data, ...rest } = it as Record<string, unknown>;
+            return rest;
+          }
+          return it;
+        });
+        return { isIncomplete, total: items.length, items: slim };
       });
     },
   };

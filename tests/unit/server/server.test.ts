@@ -25,9 +25,19 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
       validateObject: async () => ({ valid: true }),
       findTransport: async () => ({ transports: [] }),
       createTransport: async () => ({ transportRequestNumber: 'A4HK900123' }),
-      listTransports: async () => [{ number: 'A4HK900001', description: 'WIP' }],
+      listTransports: async () => ({
+        total: 1,
+        returned: 1,
+        truncated: false,
+        transports: [{ number: 'A4HK900001', description: 'WIP' }],
+      }),
       getLockStatus: async () => ({ lockingSupported: true, lockId: null }),
-      assignTransport: async () => true,
+      assignTransport: async () => ({
+        assigned: true,
+        object: 'ZCL_X',
+        objectType: 'CLAS/OC',
+        transport: 'A4HK900123',
+      }),
     },
     lsp: { sendRequest: async () => ({}), sendNotification: async () => {} },
     navigation: {
@@ -762,15 +772,15 @@ describe('createMcpServer', () => {
   it('list_transports + get_lock_status + assign_transport delegate to engine.lifecycle', async () => {
     let lockRef: unknown;
     let assignArgs: unknown;
-    let listed = false;
+    let listArgs: unknown;
     const client = await linkedClient(
       fakeEngine({
         connectedDestination: 'A4H',
         lifecycle: {
           ...fakeEngine().lifecycle,
-          listTransports: async () => {
-            listed = true;
-            return [{ number: 'A4HK900001' }];
+          listTransports: async (opts: unknown) => {
+            listArgs = opts;
+            return { total: 1, returned: 1, truncated: false, transports: [{ number: 'A4HK900001' }] };
           },
           getLockStatus: async (ref: unknown) => {
             lockRef = ref;
@@ -778,18 +788,18 @@ describe('createMcpServer', () => {
           },
           assignTransport: async (args: unknown) => {
             assignArgs = args;
-            return true;
+            return { assigned: true, object: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' };
           },
         },
       }),
     );
-    const list = await client.callTool({ name: 'list_transports', arguments: {} });
+    const list = await client.callTool({ name: 'list_transports', arguments: { limit: 5, query: 'WIP' } });
     await client.callTool({ name: 'get_lock_status', arguments: { name: 'ZCL_X', objectType: 'CLAS/OC' } });
     await client.callTool({
       name: 'assign_transport',
       arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' },
     });
-    expect(listed).toBe(true);
+    expect(listArgs).toEqual({ limit: 5, query: 'WIP' }); // server forwards limit/query
     expect(JSON.stringify(list.content)).toContain('A4HK900001');
     expect(lockRef).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC' });
     expect(assignArgs).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' });

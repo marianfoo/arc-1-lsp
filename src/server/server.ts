@@ -49,7 +49,7 @@ export function createMcpServer(engine: Engine): McpServer {
   server.registerTool(
     'list_destinations',
     {
-      description: 'List the available ABAP system destinations, federated from the embedded adt-ls.',
+      description: 'List the available ABAP system destination names (ids only), federated from the embedded adt-ls.',
       inputSchema: {},
     },
     async () => federated(await engine.callTool('abap_list_destinations', {})),
@@ -82,7 +82,7 @@ export function createMcpServer(engine: Engine): McpServer {
     'search_objects',
     {
       description:
-        'Search ABAP repository objects on the connected system by name pattern (e.g. "CL_ABAP*"). Returns name, type, description, and ADT uri for each hit.',
+        'Search ABAP repository objects on the connected system by name pattern (e.g. "CL_ABAP*"). Returns name, type, description, and ADT uri for each hit. The first search right after startup may hit a cold index — this auto-retries once, so an empty result means no match (not a warm-up miss).',
       inputSchema: {
         pattern: z.string().describe('Name pattern, e.g. "CL_ABAP_TYPEDESCR" or "ZCL_*".'),
         maxResults: z.number().int().positive().max(200).optional().describe('Max hits (default 50).'),
@@ -117,7 +117,8 @@ export function createMcpServer(engine: Engine): McpServer {
   server.registerTool(
     'list_users',
     {
-      description: 'List the system users on the connected ABAP system (id + display name).',
+      description:
+        'List ABAP user master records readable on the connected system (id + display name). An empty result means none are visible to your SAP user (it does not necessarily mean the system has no users).',
       inputSchema: {},
     },
     async () => {
@@ -392,7 +393,7 @@ export function createMcpServer(engine: Engine): McpServer {
     'get_service_details',
     {
       description:
-        'Fetch OData service details (URL, entity sets, navigations) for ONE service of a binding. Its inputs are taken from get_service_binding output (the service list). Read-only.',
+        'Fetch OData service details (URL, entity sets, navigations) for ONE service of a binding. ALL inputs are taken from get_service_binding output (call that first): serviceName + serviceDefinition + serviceVersion from its services[], plus odataInfoUri + odataVersion. Note: the returned serviceUrl is an adt-ls-internal host (not a publicly reachable endpoint) — use it for the metadata/entity-set shape, not as a callable URL. Read-only.',
       inputSchema: {
         serviceBindingName: z.string(),
         serviceName: z.string(),
@@ -432,7 +433,7 @@ export function createMcpServer(engine: Engine): McpServer {
     'document_symbols',
     {
       description:
-        'Outline an ABAP object — classes, interfaces, methods, attributes, types — with their source ranges (LSP documentSymbol). Use this to find symbol positions for the other navigation tools.',
+        'Outline an ABAP object — classes, interfaces, methods, attributes, types — with their source ranges (LSP documentSymbol). Use this to find symbol positions for the other navigation tools. `kind` is the numeric LSP SymbolKind (5=Class, 6=Method, 7=Property, 8=Field, 11=Interface, 23=Struct, …).',
       inputSchema: { name: z.string(), objectType },
     },
     async ({ name, objectType: t }) => text(await engine.navigation.documentSymbols({ name, objectType: t })),
@@ -578,11 +579,11 @@ export function createMcpServer(engine: Engine): McpServer {
     'list_atc_variants',
     {
       description:
-        'List the ATC check variants configured on the system (name → description). An empty result means none are configured (run_atc then uses the system default). `query` filters the list.',
+        'List the ATC check variants configured on the system (name → description). The variants are system-wide, but adt-ls retrieves them in the context of an anchor object, so `name` + `objectType` are REQUIRED (pass any modern object, e.g. the class you intend to check). An empty result means none are configured (run_atc then uses the system default). `query` filters the list (defaults to all).',
       inputSchema: {
-        name: z.string(),
+        name: z.string().describe('Anchor object name for backend context (e.g. the class you plan to check).'),
         objectType,
-        query: z.string().optional().describe('Filter the variant list by name fragment.'),
+        query: z.string().optional().describe('Filter the variant list by name fragment (default: all).'),
       },
     },
     async ({ name, objectType: t, query }) =>
@@ -635,14 +636,20 @@ export function createMcpServer(engine: Engine): McpServer {
     'list_transports',
     {
       description:
-        'List YOUR modifiable CTS transport requests on the connected system (number, description, owner, target). A system-wide list — unlike find_transport, which is scoped to one object. Read-only.',
-      inputSchema: {},
+        'List YOUR modifiable CTS transport requests on the connected system. A system-wide list (unlike find_transport, which is scoped to one object). Read-only. Capped to `limit` (default 100) and optionally filtered by `query` to keep the response small; returns {total, matched, returned, truncated, transports}.',
+      inputSchema: {
+        limit: z.number().int().positive().max(1000).optional().describe('Max transports to return (default 100).'),
+        query: z
+          .string()
+          .optional()
+          .describe('Case-insensitive substring filter across each row (number, description, owner, target).'),
+      },
     },
-    async () => {
+    async ({ limit, query }) => {
       if (!engine.connectedDestination) {
         return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
       }
-      return text(await engine.lifecycle.listTransports());
+      return text(await engine.lifecycle.listTransports({ limit, query }));
     },
   );
 

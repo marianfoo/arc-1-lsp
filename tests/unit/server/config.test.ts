@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfig } from '../../../src/server/config.js';
+import { detectLegacySapEnvWarnings, loadConfig } from '../../../src/server/config.js';
 
 describe('loadConfig (precedence: CLI > env > default)', () => {
   it('applies defaults', () => {
@@ -107,5 +107,36 @@ describe('loadConfig — write safety', () => {
     const c = loadConfig(['--allow-writes', 'true', '--allowed-packages', 'Z*'], {});
     expect(c.allowWrites).toBe(true);
     expect(c.allowedPackages).toEqual(['Z*']);
+  });
+});
+
+describe('detectLegacySapEnvWarnings (SAP_* → ARC1_* migration)', () => {
+  it('returns nothing when no legacy SAP_* vars are set', () => {
+    expect(detectLegacySapEnvWarnings({})).toEqual([]);
+    expect(detectLegacySapEnvWarnings({ ARC1_ALLOW_WRITES: 'true', ARC1_SAP_USER: 'X' })).toEqual([]);
+  });
+
+  it('warns when a SAP_* var is set but its ARC1_* twin is not', () => {
+    const w = detectLegacySapEnvWarnings({ SAP_ALLOW_TRANSPORT_WRITES: 'true' });
+    expect(w).toHaveLength(1);
+    expect(w[0]).toContain('SAP_ALLOW_TRANSPORT_WRITES');
+    expect(w[0]).toContain('ARC1_ALLOW_TRANSPORT_WRITES');
+    expect(w[0]).toMatch(/ignored/);
+  });
+
+  it('stays silent when both the legacy var AND its modern twin are set (twin wins)', () => {
+    expect(detectLegacySapEnvWarnings({ SAP_ALLOW_WRITES: 'true', ARC1_ALLOW_WRITES: 'false' })).toEqual([]);
+  });
+
+  it('reports each unmigrated var (writes, packages, connection)', () => {
+    const w = detectLegacySapEnvWarnings({
+      SAP_ALLOW_WRITES: 'true',
+      SAP_ALLOWED_PACKAGES: 'Z*',
+      SAP_USER: 'DEVELOPER',
+      SAP_PASSWORD: 'x',
+    });
+    expect(w).toHaveLength(4);
+    expect(w.join('\n')).toContain('ARC1_ALLOWED_PACKAGES');
+    expect(w.join('\n')).toContain('ARC1_SAP_USER');
   });
 });

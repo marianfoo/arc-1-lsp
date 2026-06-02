@@ -118,7 +118,8 @@ describe('ALL MCP tools — live e2e (needs adt-ls + ARC1_TEST_SAP_PASSWORD)', (
       await has('search_objects', { pattern: 'CL_ABAP_TYPEDESCR' }, /CL_ABAP_TYPEDESCR/);
       await has('get_object_type_details', { objectType: 'CLAS/OC' }, /fields|tag/);
       expect(Array.isArray((await call('list_inactive_objects')).json)).toBe(true);
-      expect(Array.isArray((await call('list_transports')).json)).toBe(true);
+      // list_transports is now capped + shaped {total, returned, truncated, transports:[]}.
+      expect(Array.isArray(((await call('list_transports')).json as { transports?: unknown[] }).transports)).toBe(true);
       await has('validate_object', { objectType: 'CLAS/OC', name: CLS, package: '$TMP', description: 'x' }, /\w/);
       await has(
         'find_transport',

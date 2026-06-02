@@ -52,12 +52,14 @@ export function createLifecycle(deps: LifecycleDeps) {
   /** Resolve {name, objectType} → repotree AFF URI (search → getLsUri). */
   async function resolveAffUri(ref: ObjectRef): Promise<string> {
     const d = dest();
-    const { references } = await quickSearch(driver, {
-      destination: d,
-      pattern: ref.name,
-      maxResults: 20,
-      types: [ref.objectType],
-    });
+    // retryOnEmptyMs smooths the cold repository index: the first search after a
+    // fresh connection can return [] while adt-ls warms up, which would otherwise
+    // surface as a spurious "not found" on the very first by-name op (hover/delete/…).
+    const { references } = await quickSearch(
+      driver,
+      { destination: d, pattern: ref.name, maxResults: 20, types: [ref.objectType] },
+      { retryOnEmptyMs: 600 },
+    );
     const hit =
       references.find((r) => r.name?.toUpperCase() === ref.name.toUpperCase() && r.uri) ??
       references.find((r) => r.uri);
@@ -128,7 +130,11 @@ export function createLifecycle(deps: LifecycleDeps) {
     async runUnitTests(args: ObjectRef): Promise<unknown> {
       const uri = await resolveAffUri(args);
       const res = await callTool('abap_run_unit_tests', { destination: dest(), uris: [uri] });
-      return parseFederated(res).data;
+      const data = parseFederated(res).data;
+      // adt-ls returns a bare string ("No tests found") when there are no tests.
+      // Wrap it so the result is always a JSON object — consistent with
+      // run_unit_tests_with_coverage and the rest of the toolset.
+      return typeof data === 'string' ? { message: data } : data;
     },
 
     async deleteObject(args: ObjectRef): Promise<void> {
@@ -250,16 +256,48 @@ export function createLifecycle(deps: LifecycleDeps) {
      * native rich search (which defaults the owner to the logged-on user and the
      * status to modifiable) — a system-wide transport list, vs findTransport's
      * object-scoped lookup. Read-only.
+     *
+     * The raw search can return thousands of rows on a busy system — a token bomb
+     * for an LLM context — so the result is normalized to an array, optionally
+     * filtered (client-side substring across all fields), and capped to `limit`
+     * (default 100). Returns `{total, matched, returned, truncated, transports}`.
      */
-    listTransports(): Promise<unknown> {
-      return driver.sendRequest('adtLs/cts/transport/searchTransports', { destinationId: dest() });
+    async listTransports(opts: { limit?: number; query?: string } = {}): Promise<unknown> {
+      const raw = await driver.sendRequest<unknown>('adtLs/cts/transport/searchTransports', {
+        destinationId: dest(),
+      });
+      const list: unknown[] = Array.isArray(raw)
+        ? raw
+        : Array.isArray((raw as { transports?: unknown[] } | null)?.transports)
+          ? (raw as { transports: unknown[] }).transports
+          : Array.isArray((raw as { requests?: unknown[] } | null)?.requests)
+            ? (raw as { requests: unknown[] }).requests
+            : [];
+      // Unrecognized non-array shape → return verbatim rather than silently hide data.
+      if (list.length === 0 && !Array.isArray(raw)) return raw;
+      const q = opts.query?.trim().toLowerCase();
+      const matched = q ? list.filter((t) => JSON.stringify(t).toLowerCase().includes(q)) : list;
+      const limit = opts.limit && opts.limit > 0 ? opts.limit : 100;
+      const transports = matched.slice(0, limit);
+      return {
+        total: list.length,
+        matched: matched.length,
+        returned: transports.length,
+        truncated: transports.length < matched.length,
+        transports,
+      };
     },
 
-    /** Read an object's lock status: `{lockingSupported, lockId}` (lockId null = not
-     * locked). Read-only — useful for diagnostics and pre-write checks. */
-    async getLockStatus(args: ObjectRef): Promise<unknown> {
+    /** Read an object's lock status. Always returns `{lockingSupported, lockId}` with
+     * `lockId:null` when unlocked — adt-ls omits the key entirely in that case, so we
+     * normalize it. Read-only — useful for diagnostics and pre-write checks. */
+    async getLockStatus(args: ObjectRef): Promise<{ lockingSupported: boolean; lockId: string | null }> {
       const uri = await resolveAffUri(args);
-      return driver.sendRequest('adtLs/fileSystem/getFileLockStatus', { uri });
+      const r = (await driver.sendRequest('adtLs/fileSystem/getFileLockStatus', { uri })) as {
+        lockingSupported?: boolean;
+        lockId?: string | null;
+      } | null;
+      return { lockingSupported: r?.lockingSupported ?? false, lockId: r?.lockId ?? null };
     },
 
     /**
@@ -267,14 +305,23 @@ export function createLifecycle(deps: LifecycleDeps) {
      * that has NO federated (abap_transport-*) equivalent. Mutating; gated by
      * transport-writes (also requires allowWrites). `$TMP`/local objects need no
      * transport, so adt-ls rejects assigning one to them.
+     *
+     * adt-ls returns a bare boolean (and reports `true` even for objects that need no
+     * transport, e.g. $TMP). Wrap it in a structured, self-describing result so a
+     * naked `true` isn't read as proof the assignment was meaningful.
      */
-    async assignTransport(args: ObjectRef & { transport: string }): Promise<unknown> {
+    async assignTransport(
+      args: ObjectRef & { transport: string },
+    ): Promise<{ assigned: boolean; object: string; objectType: string; transport: string }> {
       assertWriteAllowed(safety, { action: 'assign_transport', requireTransportWrites: true });
       const objectUri = await resolveAffUri(args);
-      return driver.sendRequest('adtLs/cts/transport/assignTransportToObject', {
+      const raw = await driver.sendRequest('adtLs/cts/transport/assignTransportToObject', {
         objectUri,
         transport: args.transport,
       });
+      const obj = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : null;
+      const assigned = raw === true || obj?.assigned === true || obj?.operationExecuted === true;
+      return { assigned, object: args.name, objectType: args.objectType, transport: args.transport };
     },
   };
 }

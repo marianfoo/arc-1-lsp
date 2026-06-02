@@ -5,7 +5,7 @@
  * the BTP CF deploy) lands in the deploy plan.
  */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { loadConfig } from './server/config.js';
+import { detectLegacySapEnvWarnings, loadConfig } from './server/config.js';
 import { startEngine } from './server/engine.js';
 import { startHttpServer } from './server/http.js';
 import { logger } from './server/logger.js';
@@ -13,6 +13,7 @@ import { createMcpServer } from './server/server.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  for (const w of detectLegacySapEnvWarnings()) logger.warn(`config: ${w}`);
   const engine = await startEngine(config);
 
   if (config.transport === 'http-streamable') {

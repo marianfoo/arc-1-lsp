@@ -59,6 +59,35 @@ function bool(v: string | undefined, dflt: boolean): boolean {
   return v === 'true' || v === '1' || v === 'yes';
 }
 
+/**
+ * arc-1-lsp uses ARC1_*-prefixed env vars; the main ARC-1 server uses SAP_*.
+ * Operators migrating a config often set the SAP_* form, which arc-1-lsp silently
+ * ignores (e.g. SAP_ALLOW_TRANSPORT_WRITES has no effect → transports look "off").
+ * Map each known SAP_* var to its ARC1_* twin and return a warning for every one
+ * that's set while its twin is NOT — pure; the caller logs them at startup.
+ */
+const LEGACY_ENV_TWINS: Record<string, string> = {
+  SAP_ALLOW_WRITES: 'ARC1_ALLOW_WRITES',
+  SAP_ALLOW_TRANSPORT_WRITES: 'ARC1_ALLOW_TRANSPORT_WRITES',
+  SAP_ALLOWED_PACKAGES: 'ARC1_ALLOWED_PACKAGES',
+  SAP_URL: 'ARC1_SAP_HOST',
+  SAP_HOST: 'ARC1_SAP_HOST',
+  SAP_USER: 'ARC1_SAP_USER',
+  SAP_PASSWORD: 'ARC1_SAP_PASSWORD',
+  SAP_CLIENT: 'ARC1_SAP_CLIENT',
+  SAP_LANGUAGE: 'ARC1_SAP_LANGUAGE',
+  SAP_INSECURE: 'ARC1_SAP_INSECURE',
+};
+export function detectLegacySapEnvWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
+  const out: string[] = [];
+  for (const [legacy, modern] of Object.entries(LEGACY_ENV_TWINS)) {
+    if (env[legacy] !== undefined && env[modern] === undefined) {
+      out.push(`${legacy} is set but arc-1-lsp uses ${modern} — ${legacy} is ignored. Rename it to ${modern}.`);
+    }
+  }
+  return out;
+}
+
 /** Build the SAP target from flags/env, or undefined if host/port/creds missing. */
 function loadSapTarget(argv: string[], env: NodeJS.ProcessEnv): SapTargetConfig | undefined {
   const host = flag(argv, 'sap-host') ?? env.ARC1_SAP_HOST;

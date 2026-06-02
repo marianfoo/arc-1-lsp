@@ -37,6 +37,8 @@ export function createQuality(deps: QualityDeps) {
   return {
     /**
      * List the ATC check variants configured on the system (name → description).
+     * Variants are system-wide, but the backend NamedItemService retrieves them in
+     * the context of an anchor object, so `ref` (name + objectType) is required.
      * An empty map means the backend has no variants configured — `runAtc` then
      * falls back to the system default variant. `query` filters the picker list.
      */
