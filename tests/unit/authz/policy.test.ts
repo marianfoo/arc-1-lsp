@@ -47,6 +47,9 @@ const ALL_TOOLS = [
   'run_application',
   'service_binding_details',
   'publish_service_binding',
+  'list_transports',
+  'get_lock_status',
+  'assign_transport',
 ];
 
 describe('expandScopes (admin ⊇ transport ⊇ write ⊇ read)', () => {
@@ -66,7 +69,7 @@ describe('expandScopes (admin ⊇ transport ⊇ write ⊇ read)', () => {
 });
 
 describe('TOOL_SCOPES', () => {
-  it('covers exactly the 36 registered tools (no tool silently un-scoped)', () => {
+  it('covers exactly the 39 registered tools (no tool silently un-scoped)', () => {
     expect(Object.keys(TOOL_SCOPES).sort()).toEqual([...ALL_TOOLS].sort());
   });
   it('LSP code-intelligence tools are read-scoped', () => {
@@ -96,6 +99,8 @@ describe('TOOL_SCOPES', () => {
     expect(TOOL_SCOPES.create_object).toBe('write');
     expect(TOOL_SCOPES.generate_objects).toBe('write');
     expect(TOOL_SCOPES.create_transport).toBe('transport');
+    expect(TOOL_SCOPES.assign_transport).toBe('transport'); // assigns a CTS request
+    expect(TOOL_SCOPES.list_transports).toBe('read');
     expect(TOOL_SCOPES.run_application).toBe('read'); // executes ABAP but is an inspection action
     expect(TOOL_SCOPES.publish_service_binding).toBe('write'); // mutates service state
   });

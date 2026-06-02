@@ -249,6 +249,42 @@ export function createLifecycle(deps: LifecycleDeps) {
       if (!ok) throw new Error(`create_transport failed: ${text}`);
       return data;
     },
+
+    // ── Native CTS transport + lock (adtLs/cts/transport + adtLs/fileSystem) ──
+    // The robust, always-present LSP path (vs the dynamic, backend-provided
+    // abap_transport-* IDE-action tools). See docs/research/adt-ls-capability-map.md §4c.
+
+    /**
+     * List MY modifiable CTS transport requests on the connected system. Uses the
+     * native rich search (which defaults the owner to the logged-on user and the
+     * status to modifiable) — a system-wide transport list, vs findTransport's
+     * object-scoped lookup. Read-only.
+     */
+    listTransports(): Promise<unknown> {
+      return driver.sendRequest('adtLs/cts/transport/searchTransports', { destinationId: dest() });
+    },
+
+    /** Read an object's lock status: `{lockingSupported, lockId}` (lockId null = not
+     * locked). Read-only — useful for diagnostics and pre-write checks. */
+    async getLockStatus(args: ObjectRef): Promise<unknown> {
+      const uri = await resolveAffUri(args);
+      return driver.sendRequest('adtLs/fileSystem/getFileLockStatus', { uri });
+    },
+
+    /**
+     * Assign an existing CTS transport to an object — the native lock→transport step
+     * that has NO federated (abap_transport-*) equivalent. Mutating; gated by
+     * transport-writes (also requires allowWrites). `$TMP`/local objects need no
+     * transport, so adt-ls rejects assigning one to them.
+     */
+    async assignTransport(args: ObjectRef & { transport: string }): Promise<unknown> {
+      assertWriteAllowed(safety, { action: 'assign_transport', requireTransportWrites: true });
+      const objectUri = await resolveAffUri(args);
+      return driver.sendRequest('adtLs/cts/transport/assignTransportToObject', {
+        objectUri,
+        transport: args.transport,
+      });
+    },
   };
 }
 

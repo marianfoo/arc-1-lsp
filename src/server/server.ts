@@ -612,5 +612,46 @@ export function createMcpServer(engine: Engine): McpServer {
     async ({ name }) => text(await engine.services.publishServiceBinding({ name, objectType: 'SRVB/SVB' })),
   );
 
+  // ── Native CTS transport + lock (adtLs/cts/transport + adtLs/fileSystem) ──
+  server.registerTool(
+    'list_transports',
+    {
+      description:
+        'List YOUR modifiable CTS transport requests on the connected system (number, description, owner, target). A system-wide list — unlike find_transport, which is scoped to one object. Read-only.',
+      inputSchema: {},
+    },
+    async () => {
+      if (!engine.connectedDestination) {
+        return text('No ABAP destination is connected. Configure ARC1_SAP_* (see README).');
+      }
+      return text(await engine.lifecycle.listTransports());
+    },
+  );
+
+  server.registerTool(
+    'get_lock_status',
+    {
+      description:
+        "Read an object's edit-lock status: {lockingSupported, lockId} (lockId null = not locked). Read-only diagnostic.",
+      inputSchema: { name: z.string(), objectType },
+    },
+    async ({ name, objectType: t }) => text(await engine.lifecycle.getLockStatus({ name, objectType: t })),
+  );
+
+  server.registerTool(
+    'assign_transport',
+    {
+      description:
+        'Assign an existing CTS transport request to an object (mutating — requires ARC1_ALLOW_WRITES + ARC1_ALLOW_TRANSPORT_WRITES). The native lock→transport step with no federated equivalent. $TMP/local objects need no transport.',
+      inputSchema: {
+        name: z.string(),
+        objectType,
+        transport: z.string().describe('CTS transport request number, e.g. "A4HK900123".'),
+      },
+    },
+    async ({ name, objectType: t, transport }) =>
+      text(await engine.lifecycle.assignTransport({ name, objectType: t, transport })),
+  );
+
   return server;
 }

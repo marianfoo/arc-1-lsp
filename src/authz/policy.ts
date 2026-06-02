@@ -67,6 +67,8 @@ export const TOOL_SCOPES: Record<string, Scope | null> = {
   // runtime & business services
   run_application: 'read', // executes ABAP (like run_unit_tests); SAP-side auth is the real gate
   service_binding_details: 'read',
+  list_transports: 'read',
+  get_lock_status: 'read',
   // writes
   create_object: 'write',
   update_source: 'write',
@@ -76,6 +78,7 @@ export const TOOL_SCOPES: Record<string, Scope | null> = {
   publish_service_binding: 'write',
   // transport
   create_transport: 'transport',
+  assign_transport: 'transport',
 };
 
 export type Profile = 'viewer' | 'developer' | 'admin';

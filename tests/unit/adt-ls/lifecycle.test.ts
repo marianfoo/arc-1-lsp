@@ -19,6 +19,12 @@ function fakes(opts: { readContent?: string; errorOn?: string } = {}) {
           return { uri: AFF };
         case 'adtLs/fileSystem/readFile':
           return { content: opts.readContent ?? 'CLASS zcl_x DEFINITION PUBLIC.\nENDCLASS.' };
+        case 'adtLs/cts/transport/searchTransports':
+          return [{ number: 'A4HK900001', description: 'WIP', owner: 'DEVELOPER' }];
+        case 'adtLs/fileSystem/getFileLockStatus':
+          return { lockingSupported: true, lockId: null };
+        case 'adtLs/cts/transport/assignTransportToObject':
+          return true;
         default:
           return null; // writeFile, delete
       }
@@ -278,5 +284,44 @@ describe('lifecycle transport writes', () => {
     await expect(
       f.make(TRANSPORT_ON).createTransport({ developmentPackage: 'ZFOO', transportDescription: 'd', isCreation: true }),
     ).rejects.toThrow(/create_transport failed: boom/);
+  });
+});
+
+describe('lifecycle native transport + lock', () => {
+  it('listTransports is ungated + queries native searchTransports with the destination', async () => {
+    const f = fakes();
+    const r = await f.make(WRITES_OFF).listTransports();
+    expect(JSON.stringify(r)).toContain('A4HK900001');
+    expect(f.lsp.find((c) => c.method === 'adtLs/cts/transport/searchTransports')?.params).toEqual({
+      destinationId: 'A4H',
+    });
+  });
+
+  it('getLockStatus is ungated + resolves the AFF uri then queries getFileLockStatus', async () => {
+    const f = fakes();
+    const r = (await f.make(WRITES_OFF).getLockStatus({ name: 'ZCL_X', objectType: 'CLAS/OC' })) as {
+      lockId: unknown;
+    };
+    expect(r.lockId).toBeNull();
+    expect(f.lsp.find((c) => c.method === 'adtLs/fileSystem/getFileLockStatus')?.params).toEqual({ uri: AFF });
+  });
+
+  it('assignTransport needs writes AND transport-writes, then sends objectUri + transport', async () => {
+    await expect(
+      fakes().make(WRITES_OFF).assignTransport({ name: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' }),
+    ).rejects.toThrow(/Writes are disabled/);
+    await expect(
+      fakes().make(WRITES_ON).assignTransport({ name: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' }),
+    ).rejects.toThrow(/Transport writes are disabled/);
+
+    const f = fakes();
+    const r = await f
+      .make(TRANSPORT_ON)
+      .assignTransport({ name: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' });
+    expect(r).toBe(true);
+    expect(f.lsp.find((c) => c.method === 'adtLs/cts/transport/assignTransportToObject')?.params).toEqual({
+      objectUri: AFF,
+      transport: 'A4HK900123',
+    });
   });
 });

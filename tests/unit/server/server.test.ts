@@ -25,6 +25,9 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
       validateObject: async () => ({ valid: true }),
       findTransport: async () => ({ transports: [] }),
       createTransport: async () => ({ transportRequestNumber: 'A4HK900123' }),
+      listTransports: async () => [{ number: 'A4HK900001', description: 'WIP' }],
+      getLockStatus: async () => ({ lockingSupported: true, lockId: null }),
+      assignTransport: async () => true,
     },
     lsp: { sendRequest: async () => ({}), sendNotification: async () => {} },
     navigation: {
@@ -68,6 +71,7 @@ describe('createMcpServer', () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'activate_object',
+      'assign_transport',
       'check_syntax',
       'completion',
       'create_object',
@@ -79,6 +83,7 @@ describe('createMcpServer', () => {
       'find_transport',
       'generate_objects',
       'get_generator_schema',
+      'get_lock_status',
       'get_object_type_details',
       'get_service_binding',
       'get_service_details',
@@ -91,6 +96,7 @@ describe('createMcpServer', () => {
       'list_destinations',
       'list_generators',
       'list_inactive_objects',
+      'list_transports',
       'list_users',
       'publish_service_binding',
       'read_source',
@@ -717,6 +723,48 @@ describe('createMcpServer', () => {
     const res = await client.callTool({ name: 'publish_service_binding', arguments: { name: 'Z_BIND' } });
     expect(res.isError).toBe(true);
     expect(JSON.stringify(res.content)).toContain('Writes are disabled');
+  });
+
+  it('list_transports + get_lock_status + assign_transport delegate to engine.lifecycle', async () => {
+    let lockRef: unknown;
+    let assignArgs: unknown;
+    let listed = false;
+    const client = await linkedClient(
+      fakeEngine({
+        connectedDestination: 'A4H',
+        lifecycle: {
+          ...fakeEngine().lifecycle,
+          listTransports: async () => {
+            listed = true;
+            return [{ number: 'A4HK900001' }];
+          },
+          getLockStatus: async (ref: unknown) => {
+            lockRef = ref;
+            return { lockingSupported: true, lockId: null };
+          },
+          assignTransport: async (args: unknown) => {
+            assignArgs = args;
+            return true;
+          },
+        },
+      }),
+    );
+    const list = await client.callTool({ name: 'list_transports', arguments: {} });
+    await client.callTool({ name: 'get_lock_status', arguments: { name: 'ZCL_X', objectType: 'CLAS/OC' } });
+    await client.callTool({
+      name: 'assign_transport',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' },
+    });
+    expect(listed).toBe(true);
+    expect(JSON.stringify(list.content)).toContain('A4HK900001');
+    expect(lockRef).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC' });
+    expect(assignArgs).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC', transport: 'A4HK900123' });
+  });
+
+  it('list_transports errors clearly with no destination', async () => {
+    const client = await linkedClient(fakeEngine());
+    const res = await client.callTool({ name: 'list_transports', arguments: {} });
+    expect(JSON.stringify(res.content)).toContain('No ABAP destination is connected');
   });
 
   it('type_hierarchy forwards the direction option', async () => {
