@@ -93,9 +93,9 @@ isn't cached **or the cached document version ≠ current**. And the cache is po
 > `shouldCallBackend` is always false → ABAP hover is unconditionally null.** This
 > exactly reproduces what we observed. **`documentHighlight` uses the identical gate.**
 
-**Fix (our side, no SAP dependency):** for each ABAP hover/highlight, first issue
-`textDocument/semanticTokens/full` for the same URI at the **same (unchanged) document
-version**, then call hover/highlight. (DDLS and JSON hover parse inline — no priming
+**Fix (our side, no SAP dependency) — DONE + live-verified (Batch A):** `hover` /
+`document_highlight` now issue `textDocument/semanticTokens/full` for the same URI at the
+**same (unchanged) document version**, then call hover/highlight. (DDLS and JSON hover parse inline — no priming
 needed; they already work.) `completionItem/resolve` reaches the *same* element-info
 backend renderer **without** the gate, so it's an even cheaper way to surface ABAP
 signatures/ABAP-Doc. **Hover content is rich** when reached: `LsMethodMarkdownRenderer`
@@ -113,15 +113,20 @@ registration) and opens the doc first could get **ABAP Pretty-Printer** formatti
 headless client that ignores dynamic registration (today's arc-1-lsp) sees the static
 `false` → no-op. → **a real follow-up probe**, not a flat "not served."
 
-### 3c. `ATC` — reachable; gated by backend config, not a headless limit
+### 3c. `ATC` — fully functional (wired); the "empty variants" was a probe artifact
 
-Prior verdict: *"`atc/runCheck` Internal-errors for every variant — not functional
-headless."* The decompile (`AtcCheckService`) shows: with an **empty `checkVariant`**,
-`runCheck` uses `getSystemDefaultCheckVariant()` from the backend customizing. The empty
-`getCheckVariants` on a4h means **the trial backend has no ATC variants configured** — a
-system-config gap, not a code limit. The earlier "Internal error" came from passing
-**non-existent variant names**. On an ATC-configured backend, `runCheck({objectUri:"" → system default})`
-should work. Caveat: it **busy-polls every 1 s with no internal cap** → wrap in our own timeout.
+Prior verdict: *"`atc/runCheck` Internal-errors for every variant; a4h has no variants
+configured."* **Both halves were wrong — now wired + live-verified (`run_atc`):**
+- The decompile (`AtcCheckService`) shows an **empty `checkVariant`** makes `runCheck` use
+  `getSystemDefaultCheckVariant()` from the backend customizing — so callers just pass `""`.
+- `getCheckVariants` must be sent with a **non-empty** `quickPickUserInput` — the backend's
+  `NamedItemService` rejects an empty param (`"Parameter value must not be empty"` from
+  `UriBuilder`). With the `*` wildcard, **a4h returns 15+ configured variants**
+  (`CI_INA1_CONSISTENCY`, `CHECKMAN_SECURITY`, `ACTIVATION`, `FUNCTIONAL_DB`, …). The earlier
+  "empty `{}`" was purely the empty-param artifact, not a config gap.
+- `run_atc("")` completes via the system default and returns `atcRunCheckResults` (0 on a
+  clean kernel class). It **busy-polls every 1 s server-side**, so `run_atc` wraps it in a
+  60 s timeout. Wired as `run_atc` / `list_atc_variants` (Batch B).
 
 ---
 
@@ -286,32 +291,29 @@ dynamic**, which matters for how we treat the federated tool list.
 
 ## 6. Wiring gap & prioritized build list
 
-arc-1-lsp wires the **destinations / fileSystem / repository / activation(via MCP) / mcp**
-segments + standard `textDocument/{definition,references,documentSymbol,completion,diagnostic}`
-+ `typeHierarchy`. Everything in §4a/4b and most of 4c/4e is unwired. Prioritized by
-value × effort × headless-reachability:
+arc-1-lsp wires **39 tools**. Base: destinations / fileSystem / repository /
+activation(via MCP) / mcp + standard `textDocument/{definition,references,documentSymbol,
+completion,diagnostic}` + `typeHierarchy` + the creation/generation/transport MCP tools.
 
-1. **Fix ABAP hover + documentHighlight** (§3a) — prime `semanticTokens` at the same doc
-   version, then call. Pure client-side; unlocks two advertised features we wrongly wrote
-   off. *Tiny effort, immediate value.*
-2. **`completionItem/resolve`** — enrich existing completion with signatures/ABAP-Doc;
+### Implemented in the reuse effort (all live-verified against a4h)
+| Batch | Tools | Notes |
+|---|---|---|
+| **A** | `hover`, `document_highlight`, `go_to_declaration` | semanticTokens-primed (§3a) — hover now returns rich markdown |
+| **B** | `run_atc`, `list_atc_variants`, `run_unit_tests_with_coverage` | ATC via system-default variant (§3c); coverage two-phase |
+| **C** | `run_application`, `service_binding_details`, `publish_service_binding` | run via `if_oo_adt_classrun`; srvb readFile-warmed; publish write-gated |
+| **D** | `list_transports`, `get_lock_status`, `assign_transport` | native `adtLs/cts/transport/*`; assign has no federated equivalent |
+
+### Remaining (still unwired) — prioritized
+1. **`completionItem/resolve`** — enrich completion items with signatures/ABAP-Doc;
    sidesteps the token-cache gate. *Tiny.*
-3. **`repository/quickSearch` is already wired** ✅ — but confirm facet/`types[]` exposure.
-4. **ATC** `atc/runCheck({objectUri, checkVariant:""})` — lean on the system default
-   variant; surface `AtcRunFinding` as lint. *Med; gated on an ATC-configured backend +
-   our own poll timeout.* Biggest static-analysis capability gap.
-5. **ABAP Unit (native `abapUnit/runTests`)** over the structured tree (not the text-blob
-   MCP tool) + **coverage** (`runTests(measurement="COVERAGE")` → `getCoverage`). *Med.*
-6. **SRVB `publishandUnpublishAction`** (+ `getPreviewURL`, `getServiceEntitySet`) — close
-   RAP→OData. **`run/runApplication`** — smoke-test generated ABAP, read console output. *Med.*
-7. **Native transport** (`adtLs/cts/transport/*`, esp. `assignTransportToObject`) +
-   **native `activation/activate`** (`forceActivation`, ref-based, no 15-object cap) —
-   replace the lossy/federation-dependent paths. *Med.*
-8. **`objectCreation` 4-step pipeline** as the canonical create path (richer than
-   `writeFile`); **`objectGenerator`** for one-shot RAP scaffolding with a dry-run preview.
-   *Larger; high payoff.*
-9. **`fileSystem/toggleVersion` + `getFileLockStatus`** — inactive-draft awareness + lock
-   diagnostics. *Small.*
+2. **Native `activation/activate`** (`forceActivation`, ref-based, no 15-object cap) — vs
+   today's lossy MCP `abap_activate_objects`. *Small.*
+3. **`objectCreation` 4-step pipeline** as the canonical create path (richer than
+   `writeFile` — transport-check, content-type negotiation, starter source); **`objectGenerator`**
+   for one-shot RAP scaffolding with a dry-run preview. *Larger; high payoff.*
+4. **SRVB `getPreviewURL` / `getServiceEntitySet`** — OData preview URL + bound-entity list
+   (needs an entity arg; partial overlap with `get_service_details`). *Small.*
+5. **`fileSystem/toggleVersion`** — active/inactive draft view toggle. *Small.*
 
 **Skip:** debugger (interactive DAP), modelDriven (UI protocol — covered by `abap_creation-*`),
 `getCreateFioriApp` (vscode: deep link), joule/support, sideEffects/wizard-validation.

@@ -45,7 +45,7 @@ Both are MCP servers for SAP ABAP and share the same tool shape. They differ in
 | Object-type coverage | **All** — classic *and* modern (programs, tables, function groups, domains, CDS, classes, RAP, …) | **Modern ABAP-Cloud types only** (class, interface, CDS, behavior def, service def/binding, …) |
 | Free SQL / data preview | ✅ | ❌ (absent in adt-ls) |
 | Navigation / where-used / type hierarchy | ✅ | ✅ (via adt-ls's standard LSP — `textDocument/*`) |
-| Syntax check / ATC | ✅ | ◐ syntax check ✅ (`check_syntax`); ATC deep checks ❌ |
+| Syntax check / ATC | ✅ | ✅ syntax check (`check_syntax`) + ATC (`run_atc`, system-default variant) |
 | Git (gCTS / abapGit) | ✅ | ❌ (absent in adt-ls) |
 | Maturity | Production, multi-user, write-capable | Working; reads + authoring loop; single technical user |
 
@@ -70,26 +70,34 @@ capability boundary of `adt-ls` itself is in
   `search_objects`, `list_inactive_objects`, `list_users`, `list_generators`,
   `get_generator_schema`, `get_object_type_details`, `get_service_binding`,
   `get_service_details`, `read_source`, `validate_object`, `find_transport`.
-- **Code intelligence (6, LSP):** `document_symbols` (outline), `go_to_definition`,
-  `find_references`, `type_hierarchy` (super/subtypes + implementations),
+- **Code intelligence (9, LSP):** `document_symbols` (outline), `go_to_definition`,
+  `go_to_declaration`, `find_references`, `type_hierarchy` (super/subtypes +
+  implementations), `hover` (signature + ABAP-Doc), `document_highlight`,
   `check_syntax` (the ABAP syntax check, no activation needed), `completion`.
   adt-ls is a language server — these proxy its standard `textDocument/*` APIs;
   target a declared `symbol` by name or a 1-based `line`+`character`.
+- **Quality & test (3):** `run_atc` (ABAP Test Cockpit static analysis — security/
+  performance/cloud-readiness, system-default variant), `list_atc_variants`,
+  `run_unit_tests_with_coverage` (test result + statement/branch/procedure coverage).
+- **Runtime & business services (3):** `run_application` (run an `if_oo_adt_classrun`
+  class or program, capture console output), `service_binding_details`,
+  `publish_service_binding` (publish/unpublish a SRVB → live OData; write-gated).
 - **Authoring loop (5, write-gated):** `create_object`, `update_source`,
   `activate_object`, `run_unit_tests`, `delete_object` — a full
   create → edit → activate → test → delete cycle, by object name, for modern
   ABAP-Cloud types. `activate_object` returns ranged syntax diagnostics so an
   agent can self-correct.
-- **Generation + transport (2, gated):** `generate_objects` runs a RAP generator
+- **Generation + transport (5, gated):** `generate_objects` runs a RAP generator
   (scaffolds a full table/CDS/behavior/service set); `create_transport` opens a
-  CTS transport request. For transportable (non-`$TMP`) packages the flow is
+  CTS request; `assign_transport` pins an existing TR to an object; `list_transports`
+  + `get_lock_status` (reads). For transportable (non-`$TMP`) packages the flow is
   `validate_object` → `find_transport` → (`create_transport`) →
   `create_object`/`generate_objects` (pass the TR as `transport`).
 
 **Out of scope here (use main ARC-1):** classic object types (program/table/
-function group/domain/…), free SQL, ATC deep checks (`atc/runCheck`), transport
-*release/delete*, and git. These are honest limits of `adt-ls`'s headless surface,
-not missing features — details in [`docs/arc-1-feature-parity.md`](docs/arc-1-feature-parity.md).
+function group/domain/…), free SQL, transport *release/delete*, and git. These are
+honest limits of `adt-ls`'s headless surface, not missing features — details in
+[`docs/arc-1-feature-parity.md`](docs/arc-1-feature-parity.md).
 
 The SAP session behind `adt-ls` self-heals: if it expires (idle timeout →
 "logged off"), arc-1-lsp transparently re-logs on and retries the call once.
@@ -309,7 +317,7 @@ automated from Conventional Commits via release-please.
 
 ✅ foundation → ✅ containerize → ✅ deploy to BTP CF → ✅ headless connect
 (DIRECT) → ✅ read + authoring-loop + generation/transport tools →
-✅ session self-heal → ✅ LSP code-intelligence (27 tools).
+✅ session self-heal → ✅ LSP code-intelligence + ATC + coverage + run + native transport (39 tools).
 
 **Next:** CC-mode deploy (code ready; needs a running Cloud Connector + bound
 `connectivity`/`destination`), then **per-user principal propagation** (one

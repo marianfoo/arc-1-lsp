@@ -7,8 +7,10 @@ wired, and why / why not.** All claims are backed by live probes against a4h
 > **Status (2026-05-29):** the full ABAP **authoring loop is implemented** in
 > arc-1-lsp — read_source, create, update, activate, run_unit_tests, delete — pure
 > adt-ls, behind a write-safety layer, live-verified on a4h. The by-name resolver
-> (`getLsUri`) is solved. **27 tools** (plan 07 added generation/transport/validation;
-> plan 11 added LSP code-intelligence). (History: an earlier version of this doc
+> (`getLsUri`) is solved. **39 tools** (plan 07 added generation/transport/validation;
+> plan 11 added LSP code-intelligence; the reuse effort added hover/highlight/declaration,
+> ATC + coverage, run_application, service-binding details/publish, native transport).
+> (History: an earlier version of this doc
 > wrongly called these "blocked by a workspace-model limitation" — that was a
 > wrong-URI-shape mistake; the canonical repotree/AFF URIs work headless.)
 
@@ -32,10 +34,10 @@ wired, and why / why not.** All claims are backed by live probes against a4h
 | **SAPSearch** | ✅ `search_objects` | quickSearch |
 | **SAPWrite** (create/update/delete) | ✅ `create_object`/`update_source`/`delete_object` | modern types; behind `allowWrites`; include-aware. No method-surgery/AFF-validation/batch yet. |
 | **SAPActivate** | ✅ `activate_object` (+ `list_inactive_objects`) | returns syntax diagnostics |
-| **SAPDiagnose** (unit tests) | ✅ `run_unit_tests` | no dumps/traces/ATC |
+| **SAPDiagnose** (unit tests) | ✅ `run_unit_tests` + `run_unit_tests_with_coverage` | + coverage; no dumps/traces (ATC → SAPLint `run_atc`) |
 | **SAPManage** (partial) | ◑ `list_generators`/`get_generator_schema`/**`generate_objects`**/`get_object_type_details`/**`validate_object`**/`get_service_binding`/**`get_service_details`** | RAP generation now wired; no package CRUD / FLP / UI5 |
 | **SAPNavigate** (def/refs/where-used) | ✅ `go_to_definition`/`find_references`/`document_symbols`/`type_hierarchy` | LSP `textDocument/*` — **works headless** (didOpen-as-notification; §9). Corrects the earlier "unreached" verdict. |
-| **SAPLint** (ATC/abaplint) | ◑ `check_syntax` | LSP `textDocument/diagnostic` = the ABAP syntax check (no activation). ATC deep checks (`atc/runCheck`) still ❌. |
+| **SAPLint** (ATC/abaplint) | ✅ `check_syntax` + `run_atc` | `check_syntax` = LSP `textDocument/diagnostic` (ABAP syntax, no activation); `run_atc` = ABAP Test Cockpit deep checks (system-default variant). No abaplint (that's arc-1's local linter). |
 | **SAPQuery** (free SQL) | ❌ | absent in adt-ls → arc-1 |
 | **SAPTransport** | ◑ `find_transport` (read) + `create_transport` (write, gated) | object-scoped find + TR create; no release/delete (→ arc-1) |
 | **SAPGit** | ❌ | absent in adt-ls → arc-1 |
@@ -76,8 +78,8 @@ create class → `readFile` returns its source → `activate` → `{success:true
 | **delete** — `fileSystem/delete` | ✅ | ✅ `delete_object` | deletes the `.clas.json`; gated |
 | lock / unlock — `fileSystem/{lockFile,unlockFile}` | ✅ | (internal) | adt-ls locks on write; not exposed as a tool |
 | validate creation — `abap_creation-run_validation` | ✅ | ✅ `validate_object` | pre-create check; same input as create |
-| **ATC** — `atc/runCheck` | ❌ unreached | ❌ | "Object to be checked could not be determined" even with the AFF URI (`{uris}` and `{uri}`). Param/context unknown. |
-| **navigation** — `textDocument/{documentSymbol,definition,hover}` | ❌ unclear | ❌ | `didOpen`-then-query **hangs** headless; not the path adt-ls uses. SAPNavigate = unreached. |
+| **ATC** — `adtLs/atc/runCheck` | ✅ | ✅ `run_atc` | empty `checkVariant` → system default; `objectUri` = repotree AFF URI; busy-polls (60 s timeout). `list_atc_variants` needs a non-empty query (`*`). Live-verified — corrects the earlier "unreached" verdict. |
+| **navigation** — `textDocument/{documentSymbol,definition,references,hover,…}` | ✅ | ✅ `document_symbols`/`go_to_definition`/`find_references`/`hover`/… | `didOpen` is a **notification** (the earlier "hangs" sent it as a request); hover/highlight need a `semanticTokens/full` prime. Live-verified. |
 | transport find — `abap_transport-get` | ✅ | ✅ `find_transport` | object-scoped TR lookup (read) |
 | transport create — `abap_transport-create` | ✅ | ✅ `create_transport` | CTS TR; gated by `allowTransportWrites` |
 | service info — `abap_business_services-fetch_service_information` | ✅ | ✅ `get_service_details` | OData URL/entity-sets for one service |
@@ -99,31 +101,39 @@ stays **rejected** (it'd be a hybrid) — and it's not needed.
 `.jsonc` placeholder *"not supported in ADT in VS Code — use Eclipse."* So the
 authoring loop covers modern objects; classic ABAP is **arc-1's domain.**
 
-**Genuinely unreached headless (any type):** ATC (`atc/runCheck` can't determine the
-object), navigation/where-used (`textDocument/*` hangs). **Genuinely absent:** free
-SQL, git. Honest adt-ls limits → arc-1 territory.
+**Genuinely absent (any type):** free SQL, git, transport release/delete, debugger
+(interactive DAP). **Genuinely blocked on SAP:** the unadvertised standard-LSP extras
+(`implementation`/`rename`/`codeAction`/`callHierarchy`/`workspace/symbol`) and project-wide
+`workspace/diagnostic`. (ATC and navigation/where-used — once thought unreached — are
+**wired**; see §3a/§3c of the capability map.) Honest adt-ls limits → arc-1 territory.
 
 ## 5. What can be achieved in arc-1-lsp (pure adt-ls) — current state
 
-**Live, wired (27 tools):**
+**Live, wired (39 tools):**
 - Reads: `search_objects`, `read_source`, `list_users`, `list_inactive_objects`,
   `list_generators`, `get_generator_schema`, `get_object_type_details`,
   `get_service_binding`, `get_service_details`, `validate_object`, `find_transport`,
   `list_creatable_objects`, `list_destinations`, `health`.
 - **Code intelligence (LSP `textDocument/*`):** `document_symbols`, `go_to_definition`,
-  `find_references`, `type_hierarchy`, `check_syntax`, `completion` — see §9 of
-  the reference doc.
+  `go_to_declaration`, `find_references`, `type_hierarchy`, `hover`,
+  `document_highlight` (the last two semanticTokens-primed), `check_syntax`,
+  `completion` — see §9 of the reference doc.
+- **Quality & test:** `run_atc` + `list_atc_variants` (ABAP Test Cockpit),
+  `run_unit_tests_with_coverage` (test result + coverage).
+- **Runtime & business services:** `run_application` (console output),
+  `service_binding_details`, `publish_service_binding` (write-gated).
 - **Authoring loop (modern types, behind `ARC1_ALLOW_WRITES` + package allowlist):**
   `create_object`, `update_source`, `activate_object`, `run_unit_tests`,
   `delete_object` — full create→edit→activate→test→delete, by name, live-verified.
 - **Generation + transport (gated):** `generate_objects` (RAP generator → full
-  service), `create_transport` (CTS TR; additionally `ARC1_ALLOW_TRANSPORT_WRITES`).
+  service), `create_transport` (CTS TR; additionally `ARC1_ALLOW_TRANSPORT_WRITES`),
+  `assign_transport` (native), `list_transports` + `get_lock_status` (native reads).
   `create_object`/`generate_objects` accept a transport for non-$TMP packages.
 
-**Not yet wired but reachable:** richer SAPWrite (method surgery, AFF validation,
-batch — arc-1 has these).
+**Not yet wired but reachable:** `completionItem/resolve`, native `activation/activate`
+(forceActivation/batch), the `objectCreation` 4-step pipeline, `objectGenerator`,
+SRVB preview-URL/entity-set, `toggleVersion`.
 
-**Out of scope for arc-1-lsp (→ arc-1):** classic object types, ATC/lint,
-navigation/where-used, free SQL, git, transport *release/delete*. These are the
-honest map of adt-ls's headless limits — a feature of the comparison, not a defect
-to paper over with a hybrid.
+**Out of scope for arc-1-lsp (→ arc-1):** classic object types, free SQL, git,
+transport *release/delete*, debugger. These are the honest map of adt-ls's headless
+limits — a feature of the comparison, not a defect to paper over with a hybrid.
