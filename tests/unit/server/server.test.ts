@@ -38,6 +38,11 @@ function fakeEngine(overrides: Partial<Engine> = {}): Engine {
       typeHierarchy: async () => ({ item: { name: 'ZCL_X' }, supertypes: [], subtypes: [] }),
       completion: async () => ({ isIncomplete: false, total: 0, items: [] }),
     },
+    quality: {
+      runAtc: async () => ({ atcRunCheckResults: [] }),
+      listAtcVariants: async () => ({ checkVariants: {} }),
+      runUnitTestsWithCoverage: async () => ({ status: null, result: null, coverage: null }),
+    },
     reconnect: async () => true,
     dispose: async () => {},
     ...overrides,
@@ -76,13 +81,16 @@ describe('createMcpServer', () => {
       'go_to_definition',
       'health',
       'hover',
+      'list_atc_variants',
       'list_creatable_objects',
       'list_destinations',
       'list_generators',
       'list_inactive_objects',
       'list_users',
       'read_source',
+      'run_atc',
       'run_unit_tests',
+      'run_unit_tests_with_coverage',
       'search_objects',
       'type_hierarchy',
       'update_source',
@@ -596,6 +604,59 @@ describe('createMcpServer', () => {
     });
     expect(highlightLoc).toEqual({ symbol: undefined, line: 4, character: 7 });
     expect(declLoc).toEqual({ symbol: 'RUN', line: undefined, character: undefined });
+  });
+
+  it('run_atc passes the ref + checkVariant to engine.quality.runAtc', async () => {
+    let got: { ref?: unknown; opts?: unknown } = {};
+    const client = await linkedClient(
+      fakeEngine({
+        quality: {
+          ...fakeEngine().quality,
+          runAtc: async (ref: unknown, opts: unknown) => {
+            got = { ref, opts };
+            return { atcRunCheckResults: [{ checkId: 'X', priority: 2 }] };
+          },
+        },
+      }),
+    );
+    const res = await client.callTool({
+      name: 'run_atc',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', checkVariant: 'DEFAULT' },
+    });
+    expect(got.ref).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC' });
+    expect(got.opts).toEqual({ checkVariant: 'DEFAULT' });
+    expect(JSON.stringify(res.content)).toContain('atcRunCheckResults');
+  });
+
+  it('list_atc_variants + run_unit_tests_with_coverage delegate to engine.quality', async () => {
+    let variantArgs: unknown;
+    let coverageRef: unknown;
+    const client = await linkedClient(
+      fakeEngine({
+        quality: {
+          ...fakeEngine().quality,
+          listAtcVariants: async (_ref: unknown, opts: unknown) => {
+            variantArgs = opts;
+            return { checkVariants: { DEFAULT: 'Default' } };
+          },
+          runUnitTestsWithCoverage: async (ref: unknown) => {
+            coverageRef = ref;
+            return { status: null, result: null, coverage: [{ name: 'ZCL_X' }] };
+          },
+        },
+      }),
+    );
+    await client.callTool({
+      name: 'list_atc_variants',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC', query: 'c' },
+    });
+    const cov = await client.callTool({
+      name: 'run_unit_tests_with_coverage',
+      arguments: { name: 'ZCL_X', objectType: 'CLAS/OC' },
+    });
+    expect(variantArgs).toEqual({ query: 'c' });
+    expect(coverageRef).toEqual({ name: 'ZCL_X', objectType: 'CLAS/OC' });
+    expect(JSON.stringify(cov.content)).toContain('coverage');
   });
 
   it('type_hierarchy forwards the direction option', async () => {

@@ -511,7 +511,7 @@ export function createMcpServer(engine: Engine): McpServer {
     'go_to_declaration',
     {
       description:
-        "Resolve where a symbol is declared (LSP declaration). For ABAP this is the DEFINITION/signature site (vs go_to_definition → the implementation). Target a declared `symbol` by name, or pass 1-based `line`+`character`.",
+        'Resolve where a symbol is declared (LSP declaration). For ABAP this is the DEFINITION/signature site (vs go_to_definition → the implementation). Target a declared `symbol` by name, or pass 1-based `line`+`character`.',
       inputSchema: { name: z.string(), objectType, symbol: symbolArg, line: lineArg, character: charArg },
     },
     async ({ name, objectType: t, symbol, line, character }) =>
@@ -538,6 +538,47 @@ export function createMcpServer(engine: Engine): McpServer {
     },
     async ({ name, objectType: t, symbol, line, character }) =>
       text(await engine.navigation.documentHighlight({ name, objectType: t }, { symbol, line, character })),
+  );
+
+  // ── Quality & test (ATC static analysis, ABAP Unit coverage; pure adt-ls, read-only) ──
+  server.registerTool(
+    'run_atc',
+    {
+      description:
+        'Run ABAP Test Cockpit (ATC) static analysis on an object — SAP-native checks for security, performance, naming, cloud-readiness, etc. (complements check_syntax). Omit `checkVariant` to use the system default. Findings carry priority, message, checkId, and line. Returns no findings if the backend has no ATC check variant configured (see list_atc_variants).',
+      inputSchema: {
+        name: z.string(),
+        objectType,
+        checkVariant: z.string().optional().describe('ATC check-variant name; omit to use the system default variant.'),
+      },
+    },
+    async ({ name, objectType: t, checkVariant }) =>
+      text(await engine.quality.runAtc({ name, objectType: t }, { checkVariant })),
+  );
+
+  server.registerTool(
+    'list_atc_variants',
+    {
+      description:
+        'List the ATC check variants configured on the system (name → description). An empty result means none are configured (run_atc then uses the system default). `query` filters the list.',
+      inputSchema: {
+        name: z.string(),
+        objectType,
+        query: z.string().optional().describe('Filter the variant list by name fragment.'),
+      },
+    },
+    async ({ name, objectType: t, query }) =>
+      text(await engine.quality.listAtcVariants({ name, objectType: t }, { query })),
+  );
+
+  server.registerTool(
+    'run_unit_tests_with_coverage',
+    {
+      description:
+        'Run ABAP Unit tests for an object WITH code coverage — returns the test result plus statement/branch/procedure coverage counts (covered/total) per object. Coverage is null when the object has no tests. Read-only.',
+      inputSchema: { name: z.string(), objectType },
+    },
+    async ({ name, objectType: t }) => text(await engine.quality.runUnitTestsWithCoverage({ name, objectType: t })),
   );
 
   return server;

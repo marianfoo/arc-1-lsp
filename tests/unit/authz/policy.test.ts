@@ -41,6 +41,9 @@ const ALL_TOOLS = [
   'find_references',
   'type_hierarchy',
   'completion',
+  'run_atc',
+  'list_atc_variants',
+  'run_unit_tests_with_coverage',
 ];
 
 describe('expandScopes (admin ⊇ transport ⊇ write ⊇ read)', () => {
@@ -60,7 +63,7 @@ describe('expandScopes (admin ⊇ transport ⊇ write ⊇ read)', () => {
 });
 
 describe('TOOL_SCOPES', () => {
-  it('covers exactly the 30 registered tools (no tool silently un-scoped)', () => {
+  it('covers exactly the 33 registered tools (no tool silently un-scoped)', () => {
     expect(Object.keys(TOOL_SCOPES).sort()).toEqual([...ALL_TOOLS].sort());
   });
   it('LSP code-intelligence tools are read-scoped', () => {

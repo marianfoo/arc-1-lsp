@@ -31,6 +31,7 @@ import { type Lifecycle, createLifecycle } from '../adt-ls/lifecycle.js';
 import { AdtLsMcpClient, type McpTool } from '../adt-ls/mcp-federation.js';
 import { setMcpDestination, startMcpServer, stopMcpServer } from '../adt-ls/mcp-lifecycle.js';
 import { type Navigation, createNavigation } from '../adt-ls/navigation.js';
+import { type Quality, createQuality } from '../adt-ls/quality.js';
 import { type SearchReference, type UserRef, getInactiveObjects, getUsers, quickSearch } from '../adt-ls/repository.js';
 import { isLoggedOffFederatedResult, makeRelogon, makeWithRelogon } from '../adt-ls/session-retry.js';
 import { type TlsReverseProxy, startTlsReverseProxy } from '../adt-ls/tls-reverse-proxy.js';
@@ -66,6 +67,8 @@ export interface Engine {
   lsp: LspClient;
   /** LSP code-intelligence: document symbols, definition, references, type hierarchy, syntax check, completion. */
   navigation: Navigation;
+  /** Quality & test: ATC static analysis, ABAP Unit code coverage. */
+  quality: Quality;
   /** The destination logged on at startup, if any. */
   connectedDestination?: string;
   /**
@@ -205,12 +208,14 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     },
   });
   const navigation = createNavigation({ lsp, lifecycle });
+  const quality = createQuality({ lsp, lifecycle });
 
   const engine: Engine = {
     connectedDestination,
     lifecycle,
     lsp,
     navigation,
+    quality,
     health: () => ({
       adtLs: { name: init.serverInfo?.name, version: init.serverInfo?.version, up: true },
       mcpPort: started.port,

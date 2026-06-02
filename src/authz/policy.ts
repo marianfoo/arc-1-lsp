@@ -60,6 +60,10 @@ export const TOOL_SCOPES: Record<string, Scope | null> = {
   find_references: 'read',
   type_hierarchy: 'read',
   completion: 'read',
+  // quality & test (read-only)
+  run_atc: 'read',
+  list_atc_variants: 'read',
+  run_unit_tests_with_coverage: 'read',
   // writes
   create_object: 'write',
   update_source: 'write',
