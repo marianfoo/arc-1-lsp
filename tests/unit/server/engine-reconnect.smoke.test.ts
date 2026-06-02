@@ -52,6 +52,9 @@ describe('engine.reconnect (needs adt-ls + ARC1_TEST_SAP_PASSWORD)', () => {
       // the self-heal lever — callable + idempotent (the mechanism re-logon uses)
       expect(await engine.reconnect()).toBe(true);
       expect(await engine.reconnect()).toBe(true);
+      // a successful re-logon must mark the session live (health no longer reads false
+      // after a heal — the DX#2 fix)
+      expect(engine.health().backendLive).toBe(true);
 
       // connection still works after re-logon
       const after = await engine.search('CL_ABAP_CONTEXT_INFO', { maxResults: 1 });

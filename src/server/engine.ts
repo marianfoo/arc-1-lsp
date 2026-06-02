@@ -64,8 +64,10 @@ export interface EngineHealth {
 }
 
 /** Keep-alive cadence: a cheap backend round-trip this often keeps the SAP session from
- * idle-expiring (well under any ICF session timeout) and self-heals it if it already died. */
-const KEEPALIVE_INTERVAL_MS = 240_000; // 4 min
+ * idle-expiring and self-heals it if it already died. Live logs showed the session dies
+ * ~4 min into idle, so a 4-min probe always caught it just-dead (→ re-logon churn). 3 min
+ * catches it just-alive, so the probe doubles as keep-warm activity and avoids the churn. */
+const KEEPALIVE_INTERVAL_MS = 180_000; // 3 min
 
 export interface Engine {
   health(): EngineHealth;
@@ -238,6 +240,13 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     }
   }
 
+  // Last-known SAP backend liveness, surfaced in health(). Declared here (before
+  // relogon) so a successful re-logon can mark the session live again — otherwise the
+  // dead-probe that triggered the re-logon would leave backendLive stuck false even
+  // though the session is now healed (the keep-alive heals every cycle, so health would
+  // otherwise read false between calls). Set true on any successful round-trip/re-logon.
+  let backendLive: boolean | undefined;
+
   // Self-healing SAP session: the backend security session behind adt-ls expires
   // on inactivity; afterwards every call fails with "logged off" until a reconnect
   // (previously: restart the instance). On detecting that, re-fire the proven
@@ -258,6 +267,7 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
         logger.warn(`engine: re-bind after re-logon failed: ${e instanceof Error ? e.message : String(e)}`),
       );
       logger.info(`engine: re-logon to ${connectedDestination} succeeded`);
+      backendLive = true; // session is healed → reflect it (don't leave the dead-probe's false)
       return true;
     } catch (e) {
       logger.error(`engine: re-logon failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -280,10 +290,9 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   // Dead-session detection. An idle-expired session manifests as EMPTY repository
   // results / CTS "Internal error" — NOT the "logged off" string `withRelogon` watches
   // for — while `health` still reports the destination connected. Probe a known-present
-  // object; an empty/failed probe ⇒ dead ⇒ re-logon. `backendLive` is the last-known
-  // liveness (surfaced in health); used both reactively (per request) and proactively
-  // (keep-alive heartbeat below).
-  let backendLive: boolean | undefined;
+  // object; an empty/failed probe ⇒ dead ⇒ re-logon. `backendLive` (declared above) is
+  // the last-known liveness (surfaced in health); used both reactively (per request) and
+  // proactively (keep-alive heartbeat below).
   const probeLive = async (): Promise<boolean> => {
     if (!connectedDestination) return false;
     try {
@@ -377,7 +386,10 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   if (connectedDestination) {
     logger.info('engine: warming backend caches…');
     await warmUpBackend(engine).catch(() => {});
-    logger.info('engine: warm-up done');
+    // One probe so backendLive reflects reality on the very FIRST health (warm-up may
+    // have exhausted while the backend was still cold → backendLive would read false).
+    await reviveIfDead().catch(() => {});
+    logger.info(`engine: warm-up done (backendLive=${backendLive})`);
     // Keep the SAP session alive + self-heal: a cheap probe every few minutes prevents
     // idle-expiry (which leaves health "connected" but every data call empty/"Internal
     // error") and re-logs-on if it already died. unref → never blocks process exit.

@@ -202,10 +202,20 @@ and explicit HTTP 401 (not bare `401`, to avoid false positives).
   forever. `makeReviveIfDead` (session-retry.ts) probes a known-present object; an
   empty/failed probe ⇒ dead ⇒ force a re-logon (`reconnect()`), then the caller retries.
   Wired **reactively** (engine.search / resolveAffUri on persistent empty; listTransports
-  on persistent "Internal error") and **proactively** as a 4-min keep-alive heartbeat that
-  keeps the session from expiring in the first place + self-heals if it did. `health` now
-  carries `backendLive` (last real round-trip succeeded) so agents can tell a live session
-  from a connected-but-dead one — `connectedDestination` alone is just destination metadata.
+  on persistent "Internal error") and **proactively** as a keep-alive heartbeat that keeps
+  the session from expiring + self-heals if it did. `health` now carries `backendLive` (last
+  real round-trip succeeded) so agents can tell a live session from a connected-but-dead one
+  — `connectedDestination` alone is just destination metadata.
+- **Keep-alive cadence + backendLive accuracy (2026-06-02, live-tuned).** CF logs showed the
+  session dies ~4 min into idle, so the original **4-min** probe always caught it *just-dead*
+  → a re-logon every 4 min (functional but churny) AND `backendLive` stuck `false` (the
+  dead-probe set it false; the subsequent re-logon didn't reset it). Two fixes: (1) the
+  keep-alive interval is **3 min** — catches the session *just-alive* so the probe doubles as
+  keep-warm activity (under the ~4-min expiry), expected to avoid the re-logon churn; (2) a
+  successful re-logon now sets `backendLive=true`, and a one-shot probe runs at the end of
+  warm-up, so `health.backendLive` is accurate from the first call (no longer `false` until
+  the first user search). `backendLive` is last-known (refreshed by the 3-min heartbeat + on
+  every search/re-logon), not a per-call probe — a `health` call does not itself round-trip.
 
 ## 9. LSP code-intelligence (`textDocument/*`) — the second channel
 

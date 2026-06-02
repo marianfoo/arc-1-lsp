@@ -512,7 +512,7 @@ export function createMcpServer(engine: Engine): McpServer {
     'completion',
     {
       description:
-        'Code-completion proposals at a position (LSP completion) — keywords, types, methods in context. Target by `symbol` name or 1-based `line`+`character`. Results are capped (`maxItems`).',
+        'Code-completion proposals at a position (LSP completion) — keywords, types, methods in context. Target by `symbol` name or 1-based `line`+`character`. Proposals are position-sensitive: aim at a spot INSIDE executable code (e.g. a method body, or a `line`+`character` mid-statement). A type/class/interface DECLARATION position legitimately returns `[]` (nothing to complete there) — that is not an error. Results are capped (`maxItems`).',
       inputSchema: {
         name: z.string(),
         objectType,
