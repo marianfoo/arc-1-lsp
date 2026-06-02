@@ -195,7 +195,17 @@ and explicit HTTP 401 (not bare `401`, to avoid false positives).
   `warmUpBackend()` primes search + CTS before the server serves; (2) a per-call
   cold-retry (`src/adt-ls/cold-retry.ts`) retries an empty search result OR a transient
   "Internal error" with backoff, on `engine.search` / `resolveAffUri` / `listTransports`.
-  Together the first user call (hover/search/list_transports) no longer false-negatives.
+- **Dead-session detection + keep-alive (2026-06-02) — the BIGGER one.** A SAP session
+  that idle-expires does NOT emit the "logged off" string the `withRelogon` self-heal
+  watches for — adt-ls just returns EMPTY searches + CTS "Internal error", while `health`
+  still reports the destination connected. So cold-retry alone would retry a dead session
+  forever. `makeReviveIfDead` (session-retry.ts) probes a known-present object; an
+  empty/failed probe ⇒ dead ⇒ force a re-logon (`reconnect()`), then the caller retries.
+  Wired **reactively** (engine.search / resolveAffUri on persistent empty; listTransports
+  on persistent "Internal error") and **proactively** as a 4-min keep-alive heartbeat that
+  keeps the session from expiring in the first place + self-heals if it did. `health` now
+  carries `backendLive` (last real round-trip succeeded) so agents can tell a live session
+  from a connected-but-dead one — `connectedDestination` alone is just destination metadata.
 
 ## 9. LSP code-intelligence (`textDocument/*`) — the second channel
 
