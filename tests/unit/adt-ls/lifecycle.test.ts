@@ -403,4 +403,18 @@ describe('lifecycle.listTransports shaping (token-bomb guard)', () => {
     const weird = { error: 'unexpected' };
     expect(await makeWith(weird).listTransports()).toEqual(weird);
   });
+
+  it('retries the CTS cold-window "Internal error" then returns the shaped result', async () => {
+    let i = 0;
+    const driver = {
+      sendRequest: vi.fn(async (method: string) => {
+        if (method !== 'adtLs/cts/transport/searchTransports') return null;
+        if (i++ === 0) throw new Error('Internal error'); // cold throw on the first call
+        return rows.slice(0, 2);
+      }),
+    } as unknown as AdtLsDriver;
+    const life = createLifecycle({ driver, callTool: vi.fn(), destination: () => 'A4H', safety: WRITES_OFF });
+    expect(((await life.listTransports()) as { total: number }).total).toBe(2);
+    expect(driver.sendRequest).toHaveBeenCalledTimes(2); // failed once, retried, succeeded
+  });
 });

@@ -433,7 +433,7 @@ export function createMcpServer(engine: Engine): McpServer {
     'document_symbols',
     {
       description:
-        'Outline an ABAP object — classes, interfaces, methods, attributes, types — with their source ranges (LSP documentSymbol). Use this to find symbol positions for the other navigation tools. `kind` is the numeric LSP SymbolKind (5=Class, 6=Method, 7=Property, 8=Field, 11=Interface, 23=Struct, …).',
+        'Outline an ABAP object — classes, interfaces, methods, attributes, types — with their source ranges (LSP documentSymbol). Use this to find symbol positions for the other navigation tools. `kind` is the numeric LSP SymbolKind (5=Class, 6=Method, 7=Property, 8=Field, 11=Interface, 23=Struct, …). Note: for CDS/DDLS the outline is often empty headless — read the source and pass explicit line+character (the navigation tools also fall back to a source-text scan when resolving a CDS element by `symbol`).',
       inputSchema: { name: z.string(), objectType },
     },
     async ({ name, objectType: t }) => text(await engine.navigation.documentSymbols({ name, objectType: t })),

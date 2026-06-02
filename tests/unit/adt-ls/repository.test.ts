@@ -38,26 +38,24 @@ describe('quickSearch', () => {
     expect(calls[0].params).toMatchObject({ maxResults: 10, types: ['CLAS/OC'] });
   });
 
-  it('does NOT retry on empty by default (retryOnEmptyMs unset → single call)', async () => {
+  it('does NOT retry by default (no cold flag → single call, even on empty)', async () => {
     const { driver, calls } = fakeDriver({ references: [] });
     await quickSearch(driver, { destination: 'A4H', pattern: 'Z*' });
     expect(calls).toHaveLength(1);
   });
 
-  it('retries once on an empty result when retryOnEmptyMs is set, returning the second result', async () => {
+  it('cold:true retries an empty result (cold index) then returns the eventual hit', async () => {
     const replies = [{ references: [] }, { references: [{ name: 'ZCL_X', uri: '/x' }] }];
     let i = 0;
-    const driver = {
-      sendRequest: vi.fn(async () => replies[i++]),
-    } as unknown as AdtLsDriver;
-    const r = await quickSearch(driver, { destination: 'A4H', pattern: 'ZCL_X' }, { retryOnEmptyMs: 1 });
+    const driver = { sendRequest: vi.fn(async () => replies[i++]) } as unknown as AdtLsDriver;
+    const r = await quickSearch(driver, { destination: 'A4H', pattern: 'ZCL_X' }, { cold: true });
     expect(driver.sendRequest).toHaveBeenCalledTimes(2);
     expect(r.references[0].name).toBe('ZCL_X');
   });
 
-  it('does not retry when the first result is non-empty (one call even with retryOnEmptyMs)', async () => {
+  it('cold:true does not retry when the first result is non-empty', async () => {
     const { driver } = fakeDriver({ references: [{ name: 'ZCL_X', uri: '/x' }] });
-    await quickSearch(driver, { destination: 'A4H', pattern: 'ZCL_X' }, { retryOnEmptyMs: 1 });
+    await quickSearch(driver, { destination: 'A4H', pattern: 'ZCL_X' }, { cold: true });
     expect(driver.sendRequest).toHaveBeenCalledTimes(1);
   });
 });

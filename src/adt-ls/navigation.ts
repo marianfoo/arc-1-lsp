@@ -87,6 +87,30 @@ export function createNavigation(deps: NavigationDeps) {
     return symbols.flatMap((s) => [s.name, ...(s.children ? symbolNames(s.children) : [])]);
   }
 
+  /** Locate a name's first word-boundary occurrence in the source → 0-based position.
+   * Fallback for when documentSymbol misses the symbol (notably CDS/DDLS, whose outline
+   * is empty headless) so hover/definition by `symbol` still resolve a position. */
+  function findInSource(content: string, name: string): Position | undefined {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\b${escaped}\\b`, 'i');
+    const lines = content.split('\n');
+    for (let line = 0; line < lines.length; line++) {
+      const m = re.exec(lines[line]);
+      if (m) return { line, character: m.index };
+    }
+    return undefined;
+  }
+
+  /** Strip an LSP node's opaque `data` blob (resolve payload) — dead weight in our
+   * one-shot results and a token sink. Mirrors the completion slimming. */
+  function stripData<T>(node: T): T {
+    if (node && typeof node === 'object' && 'data' in node) {
+      const { data: _data, ...rest } = node as Record<string, unknown>;
+      return rest as T;
+    }
+    return node;
+  }
+
   /**
    * Point at the symbol's NAME token. adt-ls's `selectionRange` for a class/
    * interface spans the whole body and starts at the line's column 0 (the
@@ -129,12 +153,16 @@ export function createNavigation(deps: NavigationDeps) {
       const symbols =
         (await lsp.sendRequest<DocumentSymbol[]>('textDocument/documentSymbol', { textDocument: { uri } })) ?? [];
       const hit = findSymbol(symbols, locator.symbol);
-      if (!hit) {
-        throw new Error(
-          `Symbol "${locator.symbol}" not found. Declared symbols: ${symbolNames(symbols).slice(0, 40).join(', ') || '(none)'}`,
-        );
-      }
-      return positionOfSymbol(content, hit);
+      if (hit) return positionOfSymbol(content, hit);
+      // documentSymbol missed it (e.g. CDS/DDLS, whose outline is empty headless) —
+      // fall back to locating the name in the source text before giving up.
+      const fromSource = findInSource(content, locator.symbol);
+      if (fromSource) return fromSource;
+      throw new Error(
+        `Symbol "${locator.symbol}" not found in the outline or source. Declared symbols: ${
+          symbolNames(symbols).slice(0, 40).join(', ') || '(none)'
+        }. For CDS, pass explicit 1-based line + character instead.`,
+      );
     }
     throw new Error('Provide a `symbol` name or explicit `line` + `character` (1-based).');
   }
@@ -244,12 +272,15 @@ export function createNavigation(deps: NavigationDeps) {
           })) ?? [];
         if (!Array.isArray(items) || !items[0]) return { item: null, supertypes: [], subtypes: [] };
         const item = items[0];
-        const result: { item: unknown; supertypes?: unknown; subtypes?: unknown } = { item };
+        // The super/sub queries need the ORIGINAL item (its `data` keys the resolve);
+        // strip `data` only from the RETURNED nodes (dead weight downstream).
+        const stripList = (v: unknown) => (Array.isArray(v) ? v.map(stripData) : v);
+        const result: { item: unknown; supertypes?: unknown; subtypes?: unknown } = { item: stripData(item) };
         if (direction === 'supertypes' || direction === 'both') {
-          result.supertypes = await lsp.sendRequest('typeHierarchy/supertypes', { item });
+          result.supertypes = stripList(await lsp.sendRequest('typeHierarchy/supertypes', { item }));
         }
         if (direction === 'subtypes' || direction === 'both') {
-          result.subtypes = await lsp.sendRequest('typeHierarchy/subtypes', { item });
+          result.subtypes = stripList(await lsp.sendRequest('typeHierarchy/subtypes', { item }));
         }
         return result;
       });

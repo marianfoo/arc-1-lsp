@@ -3,6 +3,7 @@
  * (`read_source` is NOT here — adt-ls's `fileSystem/readFile` needs VS Code's
  * workspace/tree model and returns empty headless; see `docs/adt-ls-tool-surface.md`.)
  */
+import { isTransientColdError, withColdRetry } from './cold-retry.js';
 import type { LspRequester } from './driver.js';
 
 /** A repository object hit from quickSearch. `uri` is the ADT object path. */
@@ -23,15 +24,16 @@ export interface QuickSearchResult {
  * the search string is `pattern` (NOT `query`) and `destination` (NOT
  * `destinationId`); `types` filters by object type (empty = all).
  *
- * `retryOnEmptyMs` (default 0 = off) smooths the cold repository index: the first
- * query after a fresh connection often returns [] while adt-ls warms up. When set,
- * an empty result is retried once after that delay. A genuinely-absent object pays
- * one extra delay — an acceptable trade for not surfacing a spurious "not found".
+ * `cold` (default false) applies the cold-backend retry: the first query after a
+ * fresh connection (or post-idle) can return [] OR throw a transient "Internal
+ * error" while adt-ls warms its repository index. With `cold:true` an empty result
+ * or a transient throw is retried with backoff. A genuinely-absent object pays a
+ * bounded extra delay — an acceptable trade for not surfacing a spurious "not found".
  */
-export async function quickSearch(
+export function quickSearch(
   driver: LspRequester,
   params: { destination: string; pattern: string; maxResults?: number; types?: string[] },
-  opts: { retryOnEmptyMs?: number } = {},
+  opts: { cold?: boolean } = {},
 ): Promise<QuickSearchResult> {
   const run = () =>
     driver.sendRequest<QuickSearchResult>('adtLs/repository/quickSearch', {
@@ -40,12 +42,13 @@ export async function quickSearch(
       maxResults: params.maxResults ?? 50,
       types: params.types ?? [],
     });
-  let r = await run();
-  if ((r.references?.length ?? 0) === 0 && (opts.retryOnEmptyMs ?? 0) > 0) {
-    await new Promise((resolve) => setTimeout(resolve, opts.retryOnEmptyMs));
-    r = await run();
-  }
-  return r;
+  if (!opts.cold) return run();
+  return withColdRetry(run, {
+    attempts: 3,
+    delayMs: 500,
+    retryResult: (r) => (r.references?.length ?? 0) === 0,
+    retryError: isTransientColdError,
+  });
 }
 
 /** List inactive (draft) objects on a destination. Uses `destinationId`. */

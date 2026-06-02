@@ -6,6 +6,7 @@ import { type WriteSafety, assertWriteAllowed } from '../server/safety.js';
  * object types adt-ls serves headless work; classic types surface a clear error.
  * See docs/adt-ls-reference.md.
  */
+import { isTransientColdError, withColdRetry } from './cold-retry.js';
 import type { LspRequester } from './driver.js';
 import { parseFederated } from './federated.js';
 import {
@@ -52,13 +53,14 @@ export function createLifecycle(deps: LifecycleDeps) {
   /** Resolve {name, objectType} → repotree AFF URI (search → getLsUri). */
   async function resolveAffUri(ref: ObjectRef): Promise<string> {
     const d = dest();
-    // retryOnEmptyMs smooths the cold repository index: the first search after a
-    // fresh connection can return [] while adt-ls warms up, which would otherwise
-    // surface as a spurious "not found" on the very first by-name op (hover/delete/…).
+    // cold:true smooths the cold repository index: the first search after a fresh
+    // connection can return [] or throw "Internal error" while adt-ls warms up, which
+    // would otherwise surface as a spurious "not found" on the very first by-name op
+    // (hover/delete/…). See cold-retry.ts.
     const { references } = await quickSearch(
       driver,
       { destination: d, pattern: ref.name, maxResults: 20, types: [ref.objectType] },
-      { retryOnEmptyMs: 600 },
+      { cold: true },
     );
     const hit =
       references.find((r) => r.name?.toUpperCase() === ref.name.toUpperCase() && r.uri) ??
@@ -263,9 +265,12 @@ export function createLifecycle(deps: LifecycleDeps) {
      * (default 100). Returns `{total, matched, returned, truncated, transports}`.
      */
     async listTransports(opts: { limit?: number; query?: string } = {}): Promise<unknown> {
-      const raw = await driver.sendRequest<unknown>('adtLs/cts/transport/searchTransports', {
-        destinationId: dest(),
-      });
+      // The CTS backend throws a transient "Internal error" during the cold window
+      // (verified live: 3 failures then success on a fresh instance) — retry it.
+      const raw = await withColdRetry(
+        () => driver.sendRequest<unknown>('adtLs/cts/transport/searchTransports', { destinationId: dest() }),
+        { attempts: 4, delayMs: 500, retryError: isTransientColdError },
+      );
       const list: unknown[] = Array.isArray(raw)
         ? raw
         : Array.isArray((raw as { transports?: unknown[] } | null)?.transports)

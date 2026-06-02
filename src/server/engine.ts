@@ -140,6 +140,34 @@ export async function startMcpWithPortFallback(
   throw lastErr;
 }
 
+/**
+ * Prime the cold SAP-side caches so the FIRST user call after a fresh connect isn't a
+ * cold miss (search returns [] / CTS throws "Internal error" until warm — verified live).
+ * Loops a cheap repository search until it yields a hit (the cold window needs several
+ * tries), then warms the CTS path once. Bounded by `attempts` AND `timeoutMs`; entirely
+ * best-effort — every error is swallowed and the engine starts regardless. The per-call
+ * cold-retry on the user path is the backstop for any residual / post-idle coldness.
+ */
+export async function warmUpBackend(
+  engine: Pick<Engine, 'search' | 'lifecycle'>,
+  opts: { attempts?: number; timeoutMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<void> {
+  const attempts = opts.attempts ?? 4;
+  const timeoutMs = opts.timeoutMs ?? 12_000;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const start = Date.now();
+  for (let i = 0; i < attempts && Date.now() - start < timeoutMs; i++) {
+    try {
+      const hits = await engine.search('CL_ABAP_TYPEDESCR', { maxResults: 1 });
+      if (hits.length) break;
+    } catch {
+      /* cold throw — try again until attempts/timeout exhausted */
+    }
+    if (i < attempts - 1) await sleep(800);
+  }
+  await engine.lifecycle.listTransports({ limit: 1 }).catch(() => {});
+}
+
 export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   const bin = resolveAdtLsPath({ explicitPath: config.adtLsPath });
   logger.info(`engine: using adt-ls at ${bin}`);
@@ -275,7 +303,7 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
       const r = await quickSearch(
         sessionRequester,
         { destination: connectedDestination, pattern, maxResults: opts.maxResults, types: opts.types },
-        { retryOnEmptyMs: 600 }, // cold-cache smoothing on the first search after connect
+        { cold: true }, // cold-cache retry (empty OR transient throw) on the first search after connect/idle
       );
       return r.references ?? [];
     },
@@ -296,6 +324,15 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
       if (tlsWorkDir) await fsp.rm(tlsWorkDir, { recursive: true, force: true }).catch(() => {});
     },
   };
+
+  // Prime cold SAP caches before we start serving, so the first user call (search/
+  // hover/list_transports) doesn't hit the cold window. Best-effort + time-bounded.
+  if (connectedDestination) {
+    logger.info('engine: warming backend caches…');
+    await warmUpBackend(engine).catch(() => {});
+    logger.info('engine: warm-up done');
+  }
+
   return engine;
 }
 

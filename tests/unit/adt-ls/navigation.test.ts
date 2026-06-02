@@ -258,3 +258,49 @@ describe('navigation hover / documentHighlight (token-cache primed)', () => {
     });
   });
 });
+
+describe('navigation symbol resolution fallback (CDS / empty outline)', () => {
+  it('resolves a symbol from the SOURCE TEXT when documentSymbol is empty', async () => {
+    const HOVER = { contents: { kind: 'markdown', value: 'currency_conversion(...)' } };
+    const f = fakes({
+      'textDocument/documentSymbol': [], // CDS/DDLS: outline empty headless
+      'adtLs/fileSystem/readFile': {
+        content: 'define view entity I_X as select from t\n{\n  key CurrencyConversion\n}',
+      },
+      'textDocument/hover': HOVER,
+    });
+    expect(await f.nav.hover(REF, { symbol: 'CurrencyConversion' })).toEqual(HOVER);
+    // located on line index 2, char 6 ("  key " then the name)
+    expect(f.reqs.find((x) => x.method === 'textDocument/hover')?.params.position).toEqual({ line: 2, character: 6 });
+  });
+
+  it('throws a clear error when the symbol is in neither the outline nor the source', async () => {
+    const f = fakes({
+      'textDocument/documentSymbol': [],
+      'adtLs/fileSystem/readFile': { content: 'define view I_X {}' },
+    });
+    await expect(f.nav.hover(REF, { symbol: 'NOPE' })).rejects.toThrow(/not found in the outline or source/);
+  });
+});
+
+describe('navigation typeHierarchy data trimming', () => {
+  it('strips `data` from returned item/super/sub nodes but keeps it on the query item', async () => {
+    const item = { name: 'ZCL_X', kind: 5, data: { big: 'blob' } };
+    const f = fakes({
+      'textDocument/prepareTypeHierarchy': [item],
+      'typeHierarchy/supertypes': [{ name: 'ZCL_SUP', data: { y: 1 } }],
+      'typeHierarchy/subtypes': [{ name: 'ZCL_SUB', data: { z: 2 } }],
+    });
+    const r = (await f.nav.typeHierarchy(REF, { symbol: 'ZCL_X' })) as {
+      item: Record<string, unknown>;
+      supertypes: Array<Record<string, unknown>>;
+      subtypes: Array<Record<string, unknown>>;
+    };
+    expect(r.item).toEqual({ name: 'ZCL_X', kind: 5 }); // data stripped
+    expect(r.supertypes[0].data).toBeUndefined();
+    expect(r.subtypes[0].data).toBeUndefined();
+    // the supertypes REQUEST must still carry the original item (its data keys the resolve)
+    const supReq = f.reqs.find((x) => x.method === 'typeHierarchy/supertypes');
+    expect((supReq?.params as { item: Record<string, unknown> }).item.data).toBeDefined();
+  });
+});
