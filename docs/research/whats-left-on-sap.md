@@ -1,5 +1,16 @@
 # What's left on SAP — the full adt-ls capability landscape
 
+> **⚠️ SUPERSEDED IN PART (2026-06-02).** This doc reverse-engineered the *minified
+> extension front-end*. The authoritative, **decompiled-server** inventory is now
+> [`adt-ls-capability-map.md`](adt-ls-capability-map.md) — read that first. It overturns
+> three verdicts here: **hover is NOT blocked on SAP** (it's a fixable client bug — we
+> never prime the token cache via `semanticTokens`; see capability-map §3a); **formatting**
+> is disabled-at-init but dynamically registered per-URI on `didOpen` (§3b); **ATC** is
+> backend-config-gated, not a headless limit (§3c). The "14 MCP tools" figure below is
+> also wrong: the embedded server has **7 static tools + a dynamic, backend-driven set**
+> (IDE-Actions → `abap_*`; capability-map §5). The strategic shape (custom `adtLs/*` is
+> the untapped seam) holds.
+
 **Question:** beyond arc-1-lsp's 27 tools, what *else* does SAP's `adt-ls` expose,
 what's reachable but unwired, and what's genuinely blocked on SAP? This is a
 code-grounded inventory, not a guess.
@@ -45,7 +56,7 @@ so the advertised set is the true boundary.
 | `diagnostic` | ✅ | **wired** `check_syntax` | `{kind:full,items}` |
 | `completion` | ✅ | **wired** `completion` | CompletionList |
 | `documentHighlight` / `codeLens` / `semanticTokens` | ✅ | skipped | low LLM value (`[]`/raw) |
-| `hover` | ✅ (advertised) | skipped | **`null` at every position** (decl + usage) — non-functional headless |
+| `hover` | ✅ (advertised) | skipped | returns `null` headless — **but fixable on OUR side** (token-cache gate; prime `semanticTokens/full` first → capability-map §3a). NOT a SAP block. |
 | `implementation`, `rename`/`prepareRename`, `codeAction`, `prepareCallHierarchy`+`callHierarchy/*`, `workspace/symbol`, `foldingRange`, `signatureHelp`, `inlayHint`, `selectionRange` | ❌ **not advertised** | — | extension references them, but the server returns **"Internal error" headless** → not available |
 | `formatting` / `rangeFormatting` / `onTypeFormatting` | ❌ (`false`) | — | `formatting` → `[]` (no-op); no pretty-print |
 
@@ -94,9 +105,10 @@ with status:
 
 ## 4. What's genuinely "left on SAP" (we can't unblock from our side)
 
-1. **`hover`** — advertised, but returns `null` at every declaration and usage
-   position. SAP's own prototype shows hover working, so it may need a newer build
-   or a resolve step we haven't found. → **ask SAP for the exact invocation.**
+1. ~~**`hover`**~~ — **CORRECTED: not a SAP block.** The decompiled server shows the
+   headless null is the `AbapDocumentTokenCache` gate (`AbapTokenFilterService.shouldCallBackend`),
+   primed only by `textDocument/semanticTokens/full`. We never send it → cache empty →
+   null. Fix on our side (capability-map §3a). Same for `documentHighlight`.
 2. **Standard-LSP "extras"** — `implementation`, `rename`, `codeAction` (quick
    fixes), `callHierarchy` (who-calls-whom), `workspace/symbol`, `foldingRange`,
    `signatureHelp` — the headless server returns "Internal error". The desktop

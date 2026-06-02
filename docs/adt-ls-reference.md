@@ -13,6 +13,12 @@ Two channels: **MCP** (adt-ls's own `/mcp`, federated via `engine.callTool`, sta
 and **LSP** (`adtLs/*` custom requests via `driver.sendRequest`, private/reverse-
 engineered). Connection recipe (logon, TLS, truststore): `docs/adt-ls-headless-notes.md`.
 
+> **Deeper map:** for the *complete* decompiled-server inventory (all 23 `adtLs/*`
+> segments / ~92 methods, per-method DTO shapes + usefulness triage + wiring gap), see
+> [`docs/research/adt-ls-capability-map.md`](research/adt-ls-capability-map.md). It is
+> ground-truth (decompiled `com.sap.adt.ls`), and corrects the **hover** / **ATC** /
+> **formatting** verdicts below — those rows now carry the corrected reading inline.
+
 ## 1. The URI model — the thing to get right
 
 adt-ls represents objects as **AFF files** in a repository tree. There are **two
@@ -64,13 +70,13 @@ silent empty result. **Don't hand-build URIs — use the one `getLsUri`/`create`
 | **Delete object** | LSP `fileSystem/delete` `{uri:<…clas.json>}` | ✅ | delete the **`.json`** metadata file (not `.abap`); mutating |
 | **Generate objects** | MCP `abap_generators-generate_objects` `{destination,generatorId,content,packageName,transportRequestNumber,referencedObjectType,referencedObjectName}` | ✅ | wired `generate_objects` — runs a RAP generator → full service (table/CDS/BDEF/SRVD/SRVB); mutating, gated; `content` = JSON string matching get_schema |
 | **Validate creation** | MCP `abap_creation-run_validation` `{destination,objectType,objectContent}` | ✅ | wired `validate_object` — pre-create check; `objectContent` like create. Live ($TMP CLAS, valid): `{"message":"ABAP Class validated successfully"}` |
-| **Transport (find)** | MCP `abap_transport-get` `{destination,objectName,objectType,developmentPackage,isCreation}` | ✅ | wired `find_transport` — object-scoped TR lookup (read). Live ($TMP, isCreation): `{"isRecordingRequired":false,"transportRequests":[],"informationMessages":[]}` (→ $TMP needs no transport) |
+| **Transport (find)** | MCP `abap_transport-get` `{destination,objectName,objectType,developmentPackage,isCreation}` | ✅ | wired `find_transport` — object-scoped TR lookup (read). Live ($TMP, isCreation): `{"isRecordingRequired":false,"transportRequests":[],"informationMessages":[]}`. ⚠ **`abap_transport-*` are DYNAMIC backend IDE-Action tools** (`AdtMCPToolsIdeActionCollector`, not in `plugin.xml`) — present only when the connected system ships `MCP_TRANSPORT-*` actions; version/system-dependent. The robust typed alternative is native LSP `adtLs/cts/transport/*` (always compiled in); `assignTransportToObject` has **no** federated equivalent (capability-map §4c/§5). |
 | **Transport (create)** | MCP `abap_transport-create` `{destination,developmentPackage,transportDescription,isCreation,objectName?,objectType?}` | ✅ | wired `create_transport` — mutating, gated by `allowTransportWrites` (+`allowWrites`) |
 | Service info | MCP `abap_business_services-fetch_service_information` (7 args from fetch_services output) | ✅ | wired `get_service_details` — OData URL/entity-sets for one service |
 | **LSP code-intelligence** | LSP `textDocument/*` (didOpen → query → didClose) | ✅ | **§9 — CORRECTED.** documentSymbol / definition / declaration / references / prepareTypeHierarchy(+supertypes/subtypes) / diagnostic / completion all work headless. Earlier "hangs" was sending `didOpen` as a *request*; it's a **notification** (driver now has `sendNotification`). |
 | **Syntax check (pull)** | LSP `textDocument/diagnostic` | ✅ | §9 — the ABAP syntax check ADT runs, WITHOUT activating; `{kind:'full',items:[…]}`. (Distinct from `atc/runCheck` ATC, still unreached.) |
-| ATC (deep checks) | LSP `adtLs/atc/runCheck` | ❌ | **Re-probed 2026-06-01.** The real method is `adtLs/atc/runCheck` (`atc/runCheck` → "unsupported"). `objectUri` is the **accepted key** (other keys → "object could not be determined"; `objectUri` → past that), but it returns **"Internal error" for every check variant tried** (`ABAP_CLOUD_DEVELOPMENT_DEFAULT`/`DEFAULT`/`ABAP_CLOUD_READINESS`/…), on both the ADT-path and repotree URI. Not functional headless in `1.0.0.202605281240` — ask SAP (like hover). The syntax-check `textDocument/diagnostic` above DOES work + covers basic checks. |
-| Formatting / pretty-print | LSP `textDocument/formatting` | ❌ | capability is `false`; the method returns `[]` (no-op). No `adtLs/*` pretty-print under the obvious names. |
+| ATC (deep checks) | LSP `adtLs/atc/runCheck` | ◐ | **CORRECTED 2026-06-02 (decompile).** Reachable — gated by **backend config, not headless**. `AtcCheckService`: with an **empty `checkVariant`** it uses `getSystemDefaultCheckVariant()`; the earlier "Internal error" was from passing **non-existent variant names**, and a4h's empty `getCheckVariants` = the trial has **no ATC variants configured**. On an ATC-configured backend, `runCheck({objectUri, checkVariant:""})` should work (it busy-polls every 1 s → wrap in our own timeout). Object key = `objectUri` (repotree). `AtcRunFinding{lineNumber,priority,location,message,checkId,…}`, report-only (no quickfix). Complementary to (not redundant with) the syntax-check `textDocument/diagnostic`. → capability-map §3c. |
+| Formatting / pretty-print | LSP `textDocument/formatting` | ◐ | **CORRECTED 2026-06-02 (decompile).** `setDocumentFormattingProvider(false)` at init → static no-op. **But** per-type `*FormatService` classes exist and `AbstractAdtFormatService` does a **dynamic per-URI `client/registerCapability` on `didOpen`** — a client honoring dynamic registration could get ABAP Pretty-Printer formatting. → probe before calling it a SAP gap (capability-map §3b). |
 | Revision history | — | ❌ | no `adtLs/repository/getRevisions`/`getVersions` (probed — "unsupported"). |
 | Free SQL / data preview | — | ❌ | no such method |
 | Git (gCTS/abapGit) | — | ❌ | not exposed |
@@ -210,8 +216,8 @@ workspaceSymbol are **absent**.
 | `textDocument/diagnostic` | ✅ | `{kind:'full',items:[…]}` — the **ABAP syntax check ADT runs, without activating**. Empty items = clean. Pull-model (no position). |
 | `textDocument/completion` | ✅ | `CompletionList` `{isIncomplete,items:[{label,labelDetails,kind,textEdit,…}]}`. Large (keywords + context). |
 | `textDocument/semanticTokens/full` | ✅ | `{data:[…]}` LSP-encoded token ints + the legend from capabilities. Low LLM value (raw highlighting). |
-| `textDocument/hover` | ◐ | provider advertised but returns **`null`** at EVERY position **exhaustively probed** — declarations (class name, method, local var, type) AND usages (type ref, param, attribute access `->`, method call). Non-functional headless in `1.0.0.202605281240` — **skipped**. SAP's prototype (Thomas) has hover working, so a newer build or a different invocation (e.g. a resolve step) likely differs → revisit per adt-ls release / ask SAP for the exact call. |
-| `textDocument/documentHighlight` | ◐ | returns `[]` even on a used local var. Low value. |
+| `textDocument/hover` | ◐→✅ | **CORRECTED 2026-06-02 (decompile).** Earlier "null headless / ask SAP" was wrong — it's **OUR bug, fixable**. `AbapLsHoverService` short-circuits to null at `AbapTokenFilterService.shouldCallBackend`, which needs a hit in `AbapDocumentTokenCache` — and that cache is primed **only** by `textDocument/semanticTokens/full` (`AbapSemanticTokensProvider.updateTokenCache`). We never send semanticTokens → cache empty → always null. **Fix:** issue `semanticTokens/full` for the same URI at the same (unchanged) doc version, then hover. Content is rich (full method signature + ABAP-Doc via `LsMethodMarkdownRenderer`). DDLS/JSON hover parse inline (no priming). → capability-map §3a. |
+| `textDocument/documentHighlight` | ◐→✅ | **Same gate as hover** (`shouldCallBackend`) — `[]` because the token cache is empty. Prime `semanticTokens/full` first → returns read/write/text occurrences (`AbapLsDocumentHighlightService`). Not "low value" — just ungated by the same fix. |
 | `textDocument/codeLens` | ◐ | returns `[]`. Low value headless. |
 
 **Positions:** LSP is 0-based `{line,character}`. For LLM-friendliness, position-based
@@ -221,5 +227,9 @@ tools resolve a **symbol name** → its `selectionRange.start` via `documentSymb
 
 **Implement (LLM-valuable):** `document_symbols`, `go_to_definition`, `find_references`
 (timeout-guarded), `type_hierarchy` (prepare+super+sub), `check_syntax` (diagnostic),
-`completion`. **Skip (researched):** hover (null), declaration (≈definition),
-documentHighlight/codeLens/semanticTokens (low value). See plan 11.
+`completion`. **Now ALSO worth wiring (decompile, 2026-06-02):** `hover` +
+`documentHighlight` — both work once `semanticTokens/full` primes the token cache (§3a
+of capability-map); `completionItem/resolve` — enriches completion with signatures via
+the same backend, **without** the cache gate. **Skip:** declaration (≈definition),
+codeLens (SRVB/JSON only), raw semanticTokens (but send it to prime hover). See plan 11
+and `docs/research/adt-ls-capability-map.md`.
