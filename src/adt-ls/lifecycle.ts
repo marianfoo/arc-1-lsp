@@ -237,6 +237,14 @@ export function createLifecycle(deps: LifecycleDeps) {
         packageName: args.developmentPackage,
         requireTransportWrites: true,
       });
+      // Local ($-prefixed) packages are non-transportable — yet the backend would still
+      // create a useless workbench TR (verified live), and there's no release/delete tool
+      // to undo it. Refuse early; find_transport already reports isRecordingRequired:false.
+      if (args.developmentPackage.trim().startsWith('$')) {
+        throw new Error(
+          `Package "${args.developmentPackage}" is local (non-transportable) — no transport is needed, so create_transport is a no-op that would orphan an empty request. Use find_transport to confirm; only call create_transport for transportable packages.`,
+        );
+      }
       const res = await callTool('abap_transport-create', {
         destination: dest(),
         developmentPackage: args.developmentPackage,

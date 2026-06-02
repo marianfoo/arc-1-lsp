@@ -279,6 +279,15 @@ describe('lifecycle transport writes', () => {
         .createTransport({ developmentPackage: 'ZPROD', transportDescription: 'd', isCreation: true }),
     ).rejects.toThrow(/not in the write allowlist/);
   });
+  it('createTransport refuses a local ($-prefixed) package (would orphan a useless TR)', async () => {
+    const f = fakes();
+    await expect(
+      f.make(TRANSPORT_ON).createTransport({ developmentPackage: '$TMP', transportDescription: 'd', isCreation: true }),
+    ).rejects.toThrow(/local \(non-transportable\)/);
+    // it must NOT have called the backend create
+    expect(f.fed.some((c) => c.name === 'abap_transport-create')).toBe(false);
+  });
+
   it('createTransport throws when adt-ls signals isError', async () => {
     const f = fakes({ errorOn: 'abap_transport-create' });
     await expect(
