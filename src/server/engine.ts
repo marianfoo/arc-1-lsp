@@ -39,7 +39,7 @@ import { type Navigation, createNavigation } from '../adt-ls/navigation.js';
 import { type Quality, createQuality } from '../adt-ls/quality.js';
 import { type SearchReference, type UserRef, getInactiveObjects, getUsers, quickSearch } from '../adt-ls/repository.js';
 import { type Services, createServices } from '../adt-ls/services.js';
-import { isLoggedOffFederatedResult, makeRelogon, makeWithRelogon } from '../adt-ls/session-retry.js';
+import { isLoggedOffFederatedResult, makeRelogon, makeReviveIfDead, makeWithRelogon } from '../adt-ls/session-retry.js';
 import { type TlsReverseProxy, startTlsReverseProxy } from '../adt-ls/tls-reverse-proxy.js';
 import { type ConnectivityBridge, startConnectivityBridge } from '../btp/bridge.js';
 import { createConnectivityProxy } from '../btp/connectivity.js';
@@ -54,7 +54,18 @@ export interface EngineHealth {
   adtLs: { name?: string; version?: string; up: boolean };
   mcpPort: number;
   connectedDestination?: string;
+  /**
+   * Last-known SAP backend liveness (a real repository round-trip succeeded). Distinct
+   * from `connectedDestination`, which only means the destination metadata is configured
+   * — the session behind it can die on idle while the destination still "looks" connected.
+   * `undefined` until the first probe/search; refreshed by the keep-alive + every search.
+   */
+  backendLive?: boolean;
 }
+
+/** Keep-alive cadence: a cheap backend round-trip this often keeps the SAP session from
+ * idle-expiring (well under any ICF session timeout) and self-heals it if it already died. */
+const KEEPALIVE_INTERVAL_MS = 240_000; // 4 min
 
 export interface Engine {
   health(): EngineHealth;
@@ -266,6 +277,29 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     sendNotification: (method: string, params?: unknown) => driver.sendNotification(method, params),
   };
 
+  // Dead-session detection. An idle-expired session manifests as EMPTY repository
+  // results / CTS "Internal error" — NOT the "logged off" string `withRelogon` watches
+  // for — while `health` still reports the destination connected. Probe a known-present
+  // object; an empty/failed probe ⇒ dead ⇒ re-logon. `backendLive` is the last-known
+  // liveness (surfaced in health); used both reactively (per request) and proactively
+  // (keep-alive heartbeat below).
+  let backendLive: boolean | undefined;
+  const probeLive = async (): Promise<boolean> => {
+    if (!connectedDestination) return false;
+    try {
+      const r = await quickSearch(
+        sessionRequester,
+        { destination: connectedDestination, pattern: 'CL_ABAP_TYPEDESCR', maxResults: 1 },
+        { cold: true },
+      );
+      backendLive = (r.references?.length ?? 0) > 0;
+    } catch {
+      backendLive = false;
+    }
+    return backendLive;
+  };
+  const reviveIfDead = makeReviveIfDead(probeLive, relogon, (m) => logger.warn(`engine: ${m}`));
+
   const safety = {
     allowWrites: config.allowWrites,
     allowTransportWrites: config.allowTransportWrites,
@@ -276,10 +310,13 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     callTool: sessionCallTool,
     destination: () => connectedDestination,
     safety,
+    reviveIfDead,
   });
   const navigation = createNavigation({ lsp, lifecycle });
   const quality = createQuality({ lsp, lifecycle });
   const services = createServices({ lsp, lifecycle, safety });
+
+  let keepAlive: ReturnType<typeof setInterval> | undefined;
 
   const engine: Engine = {
     connectedDestination,
@@ -292,6 +329,7 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
       adtLs: { name: init.serverInfo?.name, version: init.serverInfo?.version, up: true },
       mcpPort: started.port,
       connectedDestination,
+      backendLive,
     }),
     listTools: () => federation.listTools(),
     callTool: (name, args = {}) => sessionCallTool(name, args),
@@ -299,12 +337,20 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
       await setMcpDestination(driver, destinationId);
     },
     search: async (pattern, opts = {}) => {
-      if (!connectedDestination) throw new Error('No ABAP destination is connected.');
-      const r = await quickSearch(
-        sessionRequester,
-        { destination: connectedDestination, pattern, maxResults: opts.maxResults, types: opts.types },
-        { cold: true }, // cold-cache retry (empty OR transient throw) on the first search after connect/idle
-      );
+      const d = connectedDestination;
+      if (!d) throw new Error('No ABAP destination is connected.');
+      // cold:true = retry empty/transient on the cold window. If STILL empty, the session
+      // may have died (idle-expired → adt-ls returns [] not "logged off"): probe + re-logon,
+      // then search once more. A genuine no-match: probe finds the session alive → return [].
+      const doSearch = () =>
+        quickSearch(
+          sessionRequester,
+          { destination: d, pattern, maxResults: opts.maxResults, types: opts.types },
+          { cold: true },
+        );
+      let r = await doSearch();
+      if ((r.references?.length ?? 0) === 0 && (await reviveIfDead())) r = await doSearch();
+      if ((r.references?.length ?? 0) > 0) backendLive = true;
       return r.references ?? [];
     },
     listInactiveObjects: async () => {
@@ -317,6 +363,7 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     },
     reconnect: () => relogon(),
     dispose: async () => {
+      if (keepAlive) clearInterval(keepAlive);
       await stopMcpServer(driver).catch(() => {});
       await driver.dispose();
       await proxy?.close().catch(() => {});
@@ -331,6 +378,13 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     logger.info('engine: warming backend caches…');
     await warmUpBackend(engine).catch(() => {});
     logger.info('engine: warm-up done');
+    // Keep the SAP session alive + self-heal: a cheap probe every few minutes prevents
+    // idle-expiry (which leaves health "connected" but every data call empty/"Internal
+    // error") and re-logs-on if it already died. unref → never blocks process exit.
+    keepAlive = setInterval(() => {
+      void reviveIfDead().catch(() => {});
+    }, KEEPALIVE_INTERVAL_MS);
+    keepAlive.unref?.();
   }
 
   return engine;

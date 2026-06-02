@@ -78,3 +78,30 @@ export function makeWithRelogon(relogon: () => Promise<boolean>) {
     }
   };
 }
+
+/**
+ * Detect-and-heal a SAP session that died WITHOUT announcing itself. After an idle
+ * expiry adt-ls does NOT always emit the "logged off" string `withRelogon` watches
+ * for — instead the reentrance ticket lapses and repository searches come back EMPTY
+ * while CTS throws a generic "Internal error". `health` still reports the destination
+ * connected (the metadata is intact; only the session is gone), so nothing upstream
+ * notices.
+ *
+ * `makeReviveIfDead` closes that gap: probe a KNOWN-present object; an empty/failed
+ * probe means the session is dead → force a re-logon. Returns `true` iff it re-logged
+ * on (the caller should then retry its original op); `false` when the session was
+ * already alive (the empty/error was genuine, e.g. a real "not found"). Used both
+ * reactively (on an unexpected empty/`Internal error`) and proactively (a keep-alive
+ * heartbeat). Re-logon de-duplication is handled by the shared `relogon`.
+ */
+export function makeReviveIfDead(
+  probeLive: () => Promise<boolean>,
+  relogon: () => Promise<boolean>,
+  log?: (msg: string) => void,
+): () => Promise<boolean> {
+  return async () => {
+    if (await probeLive()) return false; // session answers → alive; nothing to heal
+    log?.('SAP session appears dead (liveness probe empty) — forcing re-logon');
+    return relogon();
+  };
+}

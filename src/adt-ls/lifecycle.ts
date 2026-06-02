@@ -40,6 +40,12 @@ export interface LifecycleDeps {
   /** The connected destination id, or undefined. */
   destination: () => string | undefined;
   safety: WriteSafety;
+  /**
+   * Heal a dead SAP session: probe liveness, re-logon if dead, resolve `true` iff it
+   * re-logged on (so the caller retries). Optional — when omitted (tests), the
+   * empty/error simply surfaces. See `makeReviveIfDead`.
+   */
+  reviveIfDead?: () => Promise<boolean>;
 }
 
 export function createLifecycle(deps: LifecycleDeps) {
@@ -57,11 +63,20 @@ export function createLifecycle(deps: LifecycleDeps) {
     // connection can return [] or throw "Internal error" while adt-ls warms up, which
     // would otherwise surface as a spurious "not found" on the very first by-name op
     // (hover/delete/…). See cold-retry.ts.
-    const { references } = await quickSearch(
-      driver,
-      { destination: d, pattern: ref.name, maxResults: 20, types: [ref.objectType] },
-      { cold: true },
-    );
+    const doSearch = () =>
+      quickSearch(
+        driver,
+        { destination: d, pattern: ref.name, maxResults: 20, types: [ref.objectType] },
+        { cold: true },
+      );
+    let { references } = await doSearch();
+    // Empty after cold-retry can also mean the SAP session DIED (idle-expired) — adt-ls
+    // returns [] rather than "logged off". Probe + re-logon, then search once more before
+    // declaring "not found". A genuinely-absent object: the probe finds the session alive
+    // → no re-logon → we fall through to the not-found error below. See makeReviveIfDead.
+    if (references.length === 0 && deps.reviveIfDead && (await deps.reviveIfDead())) {
+      ({ references } = await doSearch());
+    }
     const hit =
       references.find((r) => r.name?.toUpperCase() === ref.name.toUpperCase() && r.uri) ??
       references.find((r) => r.uri);
@@ -265,12 +280,23 @@ export function createLifecycle(deps: LifecycleDeps) {
      * (default 100). Returns `{total, matched, returned, truncated, transports}`.
      */
     async listTransports(opts: { limit?: number; query?: string } = {}): Promise<unknown> {
-      // The CTS backend throws a transient "Internal error" during the cold window
-      // (verified live: 3 failures then success on a fresh instance) — retry it.
-      const raw = await withColdRetry(
-        () => driver.sendRequest<unknown>('adtLs/cts/transport/searchTransports', { destinationId: dest() }),
-        { attempts: 4, delayMs: 500, retryError: isTransientColdError },
-      );
+      // The CTS backend throws a transient "Internal error" both during the cold window
+      // (verified live: a few failures then success on a fresh instance) AND when the SAP
+      // session has DIED (idle-expired) — the latter never recovers by retry alone. So:
+      // cold-retry first; if it still throws transient, revive (probe + re-logon) and retry.
+      const fetchRaw = () =>
+        withColdRetry(
+          () => driver.sendRequest<unknown>('adtLs/cts/transport/searchTransports', { destinationId: dest() }),
+          { attempts: 3, delayMs: 500, retryError: isTransientColdError },
+        );
+      let raw: unknown;
+      try {
+        raw = await fetchRaw();
+      } catch (e) {
+        if (!isTransientColdError(e) || !deps.reviveIfDead) throw e;
+        await deps.reviveIfDead(); // re-logon if the session is dead (else a harmless probe)
+        raw = await fetchRaw(); // one more pass — post-revive, or after the extra warm-up time
+      }
       const list: unknown[] = Array.isArray(raw)
         ? raw
         : Array.isArray((raw as { transports?: unknown[] } | null)?.transports)

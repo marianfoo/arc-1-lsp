@@ -3,6 +3,7 @@ import {
   isLoggedOffFederatedResult,
   isLoggedOffMessage,
   makeRelogon,
+  makeReviveIfDead,
   makeWithRelogon,
 } from '../../../src/adt-ls/session-retry.js';
 
@@ -161,5 +162,34 @@ describe('makeWithRelogon', () => {
     expect(await withRelogon(fn, isLoggedOffFederatedResult)).toBe(loggedOff);
     expect(fn).toHaveBeenCalledTimes(1);
     expect(relogon).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('makeReviveIfDead', () => {
+  it('does NOT re-logon when the liveness probe says alive (returns false)', async () => {
+    const probe = vi.fn(async () => true);
+    const relogon = vi.fn(async () => true);
+    const revive = makeReviveIfDead(probe, relogon);
+    expect(await revive()).toBe(false);
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(relogon).not.toHaveBeenCalled();
+  });
+
+  it('re-logs-on when the probe says dead and returns the re-logon outcome', async () => {
+    const probe = vi.fn(async () => false);
+    const relogon = vi.fn(async () => true);
+    const log = vi.fn();
+    const revive = makeReviveIfDead(probe, relogon, log);
+    expect(await revive()).toBe(true);
+    expect(relogon).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/dead/i));
+  });
+
+  it('propagates a failed re-logon (returns false → caller should not retry)', async () => {
+    const revive = makeReviveIfDead(
+      async () => false,
+      async () => false,
+    );
+    expect(await revive()).toBe(false);
   });
 });

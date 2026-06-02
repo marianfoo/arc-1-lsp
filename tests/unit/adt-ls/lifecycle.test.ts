@@ -69,6 +69,53 @@ describe('lifecycle.resolveAffUri', () => {
   });
 });
 
+describe('lifecycle.resolveAffUri dead-session revival', () => {
+  it('revives a dead session on an empty search, then resolves on the retry', async () => {
+    let revived = false;
+    const driver = {
+      sendRequest: vi.fn(async (method: string) => {
+        if (method === 'adtLs/repository/quickSearch') {
+          // dead session returns [] until the re-logon flips it
+          return revived
+            ? { references: [{ name: 'ZCL_X', uri: '/sap/bc/adt/oo/classes/zcl_x' }] }
+            : { references: [] };
+        }
+        if (method === 'adtLs/repository/getLsUri') return { uri: AFF };
+        return null;
+      }),
+    } as unknown as AdtLsDriver;
+    const reviveIfDead = vi.fn(async () => {
+      revived = true;
+      return true;
+    });
+    const life = createLifecycle({
+      driver,
+      callTool: vi.fn(),
+      destination: () => 'A4H',
+      safety: WRITES_OFF,
+      reviveIfDead,
+    });
+    expect(await life.resolveAffUri({ name: 'ZCL_X', objectType: 'CLAS/OC' })).toBe(AFF);
+    expect(reviveIfDead).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT revive when the object is genuinely absent (revive reports the session alive)', async () => {
+    const driver = {
+      sendRequest: vi.fn(async () => ({ references: [] })),
+    } as unknown as AdtLsDriver;
+    const reviveIfDead = vi.fn(async () => false); // probe says alive → genuine not-found
+    const life = createLifecycle({
+      driver,
+      callTool: vi.fn(),
+      destination: () => 'A4H',
+      safety: WRITES_OFF,
+      reviveIfDead,
+    });
+    await expect(life.resolveAffUri({ name: 'ZNOPE', objectType: 'CLAS/OC' })).rejects.toThrow(/not found/);
+    expect(reviveIfDead).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('lifecycle.readSource', () => {
   it('returns the source', async () => {
     expect(await fakes().make(WRITES_OFF).readSource({ name: 'ZCL_X', objectType: 'CLAS/OC' })).toContain(
@@ -416,5 +463,29 @@ describe('lifecycle.listTransports shaping (token-bomb guard)', () => {
     const life = createLifecycle({ driver, callTool: vi.fn(), destination: () => 'A4H', safety: WRITES_OFF });
     expect(((await life.listTransports()) as { total: number }).total).toBe(2);
     expect(driver.sendRequest).toHaveBeenCalledTimes(2); // failed once, retried, succeeded
+  });
+
+  it('revives a dead session when the CTS "Internal error" survives cold-retry', async () => {
+    let healed = false;
+    const driver = {
+      sendRequest: vi.fn(async (method: string) => {
+        if (method !== 'adtLs/cts/transport/searchTransports') return null;
+        if (!healed) throw new Error('Internal error'); // dead session: never recovers by retry
+        return rows.slice(0, 2);
+      }),
+    } as unknown as AdtLsDriver;
+    const reviveIfDead = vi.fn(async () => {
+      healed = true;
+      return true;
+    });
+    const life = createLifecycle({
+      driver,
+      callTool: vi.fn(),
+      destination: () => 'A4H',
+      safety: WRITES_OFF,
+      reviveIfDead,
+    });
+    expect(((await life.listTransports()) as { total: number }).total).toBe(2);
+    expect(reviveIfDead).toHaveBeenCalledTimes(1); // cold-retry exhausted → revived → retried
   });
 });
