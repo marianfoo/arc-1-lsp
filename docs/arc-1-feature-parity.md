@@ -2,7 +2,8 @@
 
 What the two editions cover, and for every adt-ls-reachable capability: **is it
 wired, and why / why not.** All claims are backed by live probes against a4h
-(S/4HANA 2023, kernel 7.58), 2026-05-29.
+(S/4HANA 2023, kernel 7.58) — the authoring loop 2026-05-29, the full 39-tool
+surface re-verified end-to-end through the MCP server 2026-06-02.
 
 > **Status (2026-05-29):** the full ABAP **authoring loop is implemented** in
 > arc-1-lsp — read_source, create, update, activate, run_unit_tests, delete — pure
@@ -19,9 +20,9 @@ wired, and why / why not.** All claims are backed by live probes against a4h
 | | arc-1 (main) | arc-1-lsp |
 |---|---|---|
 | ADT protocol | **hand-rolled** (CSRF, locking, XML, version quirks) | **delegated to SAP's `adt-ls`** |
-| Source files / LOC | 86 / ~38,600 | 24 / ~2,400 |
-| Test files | 98 | 22 |
-| Stage | production, write-capable, multi-user | read + authoring loop; 16 tools |
+| Source files / LOC | 86 / ~38,600 | 28 / ~3,500 |
+| Test files | 98 | 36 |
+| Stage | production, write-capable, multi-user | reads + code-intel + quality + authoring + runtime; **39 tools** |
 | System-specific code to own | ~29 ADT files | ~zero |
 | Object-type scope | all (classic + modern) | **modern ABAP-Cloud only** (§4); classic → arc-1 |
 | Write safety | allowWrites + pkg allowlist + 7 scopes + deny-actions | allowWrites + pkg allowlist (v1) |
@@ -36,13 +37,13 @@ wired, and why / why not.** All claims are backed by live probes against a4h
 | **SAPActivate** | ✅ `activate_object` (+ `list_inactive_objects`) | returns syntax diagnostics |
 | **SAPDiagnose** (unit tests) | ✅ `run_unit_tests` + `run_unit_tests_with_coverage` | + coverage; no dumps/traces (ATC → SAPLint `run_atc`) |
 | **SAPManage** (partial) | ◑ `list_generators`/`get_generator_schema`/**`generate_objects`**/`get_object_type_details`/**`validate_object`**/`get_service_binding`/**`get_service_details`** | RAP generation now wired; no package CRUD / FLP / UI5 |
-| **SAPNavigate** (def/refs/where-used) | ✅ `go_to_definition`/`find_references`/`document_symbols`/`type_hierarchy` | LSP `textDocument/*` — **works headless** (didOpen-as-notification; §9). Corrects the earlier "unreached" verdict. |
+| **SAPNavigate** (def/refs/where-used) | ✅ `go_to_definition`/`go_to_declaration`/`find_references`/`document_symbols`/`type_hierarchy`/`hover`/`document_highlight` | LSP `textDocument/*` — **works headless** (didOpen-as-notification; §9). hover/highlight are semanticTokens-primed. Corrects the earlier "unreached" verdict. |
 | **SAPLint** (ATC/abaplint) | ✅ `check_syntax` + `run_atc` | `check_syntax` = LSP `textDocument/diagnostic` (ABAP syntax, no activation); `run_atc` = ABAP Test Cockpit deep checks (system-default variant). No abaplint (that's arc-1's local linter). |
 | **SAPQuery** (free SQL) | ❌ | absent in adt-ls → arc-1 |
-| **SAPTransport** | ◑ `find_transport` (read) + `create_transport` (write, gated) | object-scoped find + TR create; no release/delete (→ arc-1) |
+| **SAPTransport** | ◑ `find_transport`/`list_transports`/`get_lock_status` (read) + `create_transport`/`assign_transport` (write, gated) | object-scoped find + my-transports list + lock status + TR create/assign (native `adtLs/cts/transport`); no release/delete (→ arc-1) |
 | **SAPGit** | ❌ | absent in adt-ls → arc-1 |
 | **SAPContext** (deps/compression) | ❌ | depends on navigation → arc-1 |
-| *(adt-ls extras)* | ✅ `health`, `list_destinations`, `list_creatable_objects`, `list_users` | |
+| *(adt-ls extras)* | ✅ `health`, `list_destinations`, `list_creatable_objects`, `list_users`, `run_application` (console run), `service_binding_details`, `publish_service_binding` (write) | RAP service-exposure + console run — no direct arc-1 equivalent |
 
 ## 2. The URI lesson (why earlier verdicts were wrong)
 
@@ -83,6 +84,11 @@ create class → `readFile` returns its source → `activate` → `{success:true
 | transport find — `abap_transport-get` | ✅ | ✅ `find_transport` | object-scoped TR lookup (read) |
 | transport create — `abap_transport-create` | ✅ | ✅ `create_transport` | CTS TR; gated by `allowTransportWrites` |
 | service info — `abap_business_services-fetch_service_information` | ✅ | ✅ `get_service_details` | OData URL/entity-sets for one service |
+| **code coverage** — `adtLs/coverage/getCoverage` | ✅ | ✅ `run_unit_tests_with_coverage` | two-phase: `runTests(measurement=COVERAGE)` → `getCoverage`; statement/branch/procedure counts |
+| **run application** — `adtLs/run/runApplication` | ✅ | ✅ `run_application` | run an `if_oo_adt_classrun` class / program → console output; live-verified |
+| **service binding details/publish** — `adtLs/businessservice/srvb/*` | ✅ | ✅ `service_binding_details` / `publish_service_binding` (write) | native srvb segment (readFile-warms the SFS first); publish toggles the live OData service |
+| **native transport** — `adtLs/cts/transport/*` | ✅ | ✅ `list_transports` / `assign_transport` (write) + `get_lock_status` (`fileSystem/getFileLockStatus`) | typed LSP transport vs the dynamic federated `abap_transport-*`; `assign_transport` has no federated equivalent |
+| **hover / occurrences** — `textDocument/{hover,documentHighlight}` | ✅ | ✅ `hover` / `document_highlight` | semanticTokens-primed (the ABAP token-cache gate); hover = signature + ABAP-Doc |
 | Free SQL / data preview | — | ❌ | **absent** from adt-ls |
 | Git (gCTS/abapGit) | — | ❌ | **absent** from adt-ls |
 
