@@ -63,11 +63,14 @@ export interface EngineHealth {
   backendLive?: boolean;
 }
 
-/** Keep-alive cadence: a cheap backend round-trip this often keeps the SAP session from
- * idle-expiring and self-heals it if it already died. Live logs showed the session dies
- * ~4 min into idle, so a 4-min probe always caught it just-dead (→ re-logon churn). 3 min
- * catches it just-alive, so the probe doubles as keep-warm activity and avoids the churn. */
-const KEEPALIVE_INTERVAL_MS = 180_000; // 3 min
+/** Keep-alive cadence. Live logs showed the SAP session behind adt-ls dies in <3 min of
+ * idle and ONLY a full re-logon revives it (a probe-retry doesn't), so the heartbeat can't
+ * prevent the death — it heals it. To avoid re-logging on 24/7 on an idle server, the
+ * heartbeat is ACTIVITY-GATED: it only runs within KEEPALIVE_ACTIVITY_WINDOW_MS of the last
+ * user call. Past that, the session is allowed to lapse and the next user call self-heals
+ * via the reactive revive (one-time ~re-logon cost on that call). */
+const KEEPALIVE_INTERVAL_MS = 180_000; // 3 min — under the <3-min death, so warm calls stay fast during use
+const KEEPALIVE_ACTIVITY_WINDOW_MS = 900_000; // 15 min — keep warm this long after the last user call
 
 export interface Engine {
   health(): EngineHealth;
@@ -275,15 +278,31 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     }
   });
   const withRelogon = makeWithRelogon(relogon);
-  const sessionCallTool = (name: string, args: Record<string, unknown> = {}) =>
-    withRelogon(() => federation.callTool(name, args), isLoggedOffFederatedResult);
+  // Activity-gated keep-alive: track the last USER-initiated backend call so the
+  // heartbeat only keeps the session warm while it's actually being used, and goes
+  // quiet (no background re-logon churn) once idle. The keep-alive's own probe must
+  // NOT count as activity (it uses the raw `driver`, below) or it would self-perpetuate.
+  let lastActivityAt = Date.now();
+  const markActivity = (): void => {
+    lastActivityAt = Date.now();
+  };
+  const sessionCallTool = (name: string, args: Record<string, unknown> = {}) => {
+    markActivity();
+    return withRelogon(() => federation.callTool(name, args), isLoggedOffFederatedResult);
+  };
   const sessionRequester: LspRequester = {
-    sendRequest: <T>(method: string, params?: unknown) => withRelogon<T>(() => driver.sendRequest<T>(method, params)),
+    sendRequest: <T>(method: string, params?: unknown) => {
+      markActivity();
+      return withRelogon<T>(() => driver.sendRequest<T>(method, params));
+    },
   };
   // Code-intelligence LSP client: relogon-wrapped requests + raw notifications
   // (didOpen/didClose are fire-and-forget, no response to retry).
   const lsp: LspClient = {
-    sendRequest: <T>(method: string, params?: unknown) => withRelogon<T>(() => driver.sendRequest<T>(method, params)),
+    sendRequest: <T>(method: string, params?: unknown) => {
+      markActivity();
+      return withRelogon<T>(() => driver.sendRequest<T>(method, params));
+    },
     sendNotification: (method: string, params?: unknown) => driver.sendNotification(method, params),
   };
 
@@ -292,12 +311,14 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   // for — while `health` still reports the destination connected. Probe a known-present
   // object; an empty/failed probe ⇒ dead ⇒ re-logon. `backendLive` (declared above) is
   // the last-known liveness (surfaced in health); used both reactively (per request) and
-  // proactively (keep-alive heartbeat below).
+  // proactively (keep-alive heartbeat below). The probe uses the RAW `driver` (not
+  // sessionRequester) so it doesn't mark activity — otherwise the heartbeat would keep
+  // itself alive forever and never let an idle session lapse.
   const probeLive = async (): Promise<boolean> => {
     if (!connectedDestination) return false;
     try {
       const r = await quickSearch(
-        sessionRequester,
+        driver,
         { destination: connectedDestination, pattern: 'CL_ABAP_TYPEDESCR', maxResults: 1 },
         { cold: true },
       );
@@ -390,10 +411,12 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     // have exhausted while the backend was still cold → backendLive would read false).
     await reviveIfDead().catch(() => {});
     logger.info(`engine: warm-up done (backendLive=${backendLive})`);
-    // Keep the SAP session alive + self-heal: a cheap probe every few minutes prevents
-    // idle-expiry (which leaves health "connected" but every data call empty/"Internal
-    // error") and re-logs-on if it already died. unref → never blocks process exit.
+    // Keep the SAP session warm WHILE IN USE + self-heal: probe+heal every few minutes,
+    // but ONLY within the activity window of the last user call — so an idle server stops
+    // re-logging on (no 24/7 churn) and the next user call self-heals reactively instead.
+    // unref → never blocks process exit.
     keepAlive = setInterval(() => {
+      if (Date.now() - lastActivityAt > KEEPALIVE_ACTIVITY_WINDOW_MS) return; // idle → let it lapse
       void reviveIfDead().catch(() => {});
     }, KEEPALIVE_INTERVAL_MS);
     keepAlive.unref?.();

@@ -206,16 +206,19 @@ and explicit HTTP 401 (not bare `401`, to avoid false positives).
   the session from expiring + self-heals if it did. `health` now carries `backendLive` (last
   real round-trip succeeded) so agents can tell a live session from a connected-but-dead one
   — `connectedDestination` alone is just destination metadata.
-- **Keep-alive cadence + backendLive accuracy (2026-06-02, live-tuned).** CF logs showed the
-  session dies ~4 min into idle, so the original **4-min** probe always caught it *just-dead*
-  → a re-logon every 4 min (functional but churny) AND `backendLive` stuck `false` (the
-  dead-probe set it false; the subsequent re-logon didn't reset it). Two fixes: (1) the
-  keep-alive interval is **3 min** — catches the session *just-alive* so the probe doubles as
-  keep-warm activity (under the ~4-min expiry), expected to avoid the re-logon churn; (2) a
-  successful re-logon now sets `backendLive=true`, and a one-shot probe runs at the end of
-  warm-up, so `health.backendLive` is accurate from the first call (no longer `false` until
-  the first user search). `backendLive` is last-known (refreshed by the 3-min heartbeat + on
-  every search/re-logon), not a per-call probe — a `health` call does not itself round-trip.
+- **Keep-alive: activity-gated + backendLive accuracy (2026-06-02, live-tuned).** CF logs
+  proved the session dies in **<3 min** of idle and ONLY a full re-logon revives it (a
+  probe-retry doesn't) — so the heartbeat can't *prevent* the death, it heals it. A plain
+  3-min (or even 2-min) heartbeat therefore re-logs on 24/7 on an idle server (~480/day,
+  audit-log noise). Fix = **activity-gated keep-alive**: the heartbeat (every 3 min) only
+  runs within `KEEPALIVE_ACTIVITY_WINDOW_MS` (15 min) of the last USER call, so an active
+  session stays warm (fast calls) but an idle server goes quiet; the next user call after a
+  lapse self-heals via the **reactive revive** (a one-time ~re-logon cost on that call). The
+  keep-alive probe uses the RAW driver so it doesn't count as activity (else it'd never let
+  the session lapse). Separately: a successful re-logon sets `backendLive=true`, and a
+  one-shot probe runs at the end of warm-up, so `health.backendLive` is accurate from the
+  first call. `backendLive` is last-known (refreshed by the heartbeat + every search/re-logon),
+  NOT a per-call probe — a `health` call does not itself round-trip the backend.
 
 ## 9. LSP code-intelligence (`textDocument/*`) — the second channel
 
