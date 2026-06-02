@@ -1,10 +1,13 @@
 # Research: LSP code-intelligence for arc-1-lsp — Claude Code LSP plugin vs. MCP-LSP-proxy
 
-> **Status: IMPLEMENTED** (plan 11 → `src/adt-ls/navigation.ts`, 6 tools). This is
-> the research that led to the build; the live capability map + shapes are
-> consolidated in [`adt-ls-reference.md` §9](../adt-ls-reference.md). Option B
-> (MCP-LSP-proxy) was chosen; Option A (a direct Claude Code LSP plugin) is not
-> viable for remote ABAP (see §2).
+> **Status: IMPLEMENTED** (plan 11 → `src/adt-ls/navigation.ts`, now **9 tools** — the
+> reuse effort added `hover`, `go_to_declaration`, `document_highlight`). This is the
+> research that led to the build; the live capability map + shapes are consolidated in
+> [`adt-ls-reference.md` §9](../adt-ls-reference.md) and the decompiled surface in
+> [`research/adt-ls-capability-map.md`](adt-ls-capability-map.md). Option B (MCP-LSP-proxy)
+> was chosen; Option A (a direct Claude Code LSP plugin) is not viable for remote ABAP (§2).
+> NOTE: the body below pre-dates the build — its "skip hover (null)" / "❌ rows" notes are
+> superseded: hover/highlight ARE wired (semanticTokens-primed, capability-map §3a), as is ATC.
 
 **Question (2026-06-01):** Claude Code can host LSP plugins (jump-to-def, find-refs,
 diagnostics). Can arc-1-lsp use that — or should it expose adt-ls's standard LSP

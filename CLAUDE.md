@@ -70,10 +70,18 @@ src/
 │   ├── mcp-federation.ts    # Streamable-HTTP client to adt-ls's own /mcp
 │   ├── repository.ts        # LSP queries + file ops: quickSearch, getUsers, getLsUri (name→AFF URI),
 │   │                        #   readFile/writeFile/deleteFile + AFF-URI helpers
+│   ├── federated.ts         # parseFederated: unwrap an adt-ls MCP result → clean payload (prefer full
+│   │                        #   content text over the lossy structuredContent projection)
 │   ├── lifecycle.ts         # authoring loop: resolveAffUri + read/create/update/activate/test/delete
-│   │                        #   + generateObjects (RAP gen) / validateObject / find+createTransport
-│   ├── navigation.ts        # LSP code-intelligence: documentSymbols/definition/references/typeHierarchy/
-│   │                        #   checkSyntax/completion (didOpen→query→didClose; per-URI lock). See reference §9.
+│   │                        #   + generateObjects (RAP gen) / validateObject + transport: find/create
+│   │                        #   /assign (native adtLs/cts/transport) + list / getLockStatus
+│   ├── navigation.ts        # LSP code-intelligence: documentSymbols/definition/declaration/references/
+│   │                        #   typeHierarchy/hover/documentHighlight/checkSyntax/completion (didOpen→query→
+│   │                        #   didClose; per-URI lock; hover/highlight prime semanticTokens). See reference §9.
+│   ├── quality.ts           # ATC (runCheck/getCheckVariants — empty variant=system default, "*" lists) +
+│   │                        #   ABAP Unit coverage (runTests measurement=COVERAGE → getCoverage); timeout-guarded
+│   ├── services.ts          # runApplication (console run) + service-binding details/publish (native srvb;
+│   │                        #   readFile-warms the SFS first); publish is write-gated
 │   ├── session-retry.ts     # self-heal: detect "logged off" + re-logon & retry once (both channels)
 │   ├── destinations.ts      # initializeService/create/ensureLoggedOn/getLogonInfo + headless
 │   │                        #   reentrance-ticket logon handler (ADR-0006)
@@ -96,14 +104,17 @@ src/
     ├── http.ts              # http-streamable transport + API-key gate + /healthz
     ├── engine.ts            # discover→spawn→startMCP→federate; planConnection + connect (direct|CC); search/listInactive;
     │                        #   self-heal re-logon on lost SAP session (reconnect(), wraps both channels)
-    └── server.ts            # McpServer + 27 tools: reads (health, list_destinations, list_creatable_objects,
-    │                        #   search_objects, list_inactive_objects, list_users, list_generators,
-    │                        #   get_generator_schema, get_object_type_details, get_service_binding,
-    │                        #   get_service_details, read_source, validate_object, find_transport)
-    │                        #   + code-intel (document_symbols, go_to_definition, find_references,
-    │                        #   type_hierarchy, check_syntax, completion)
-    │                        #   + authoring loop (create_object, update_source, activate_object,
-    │                        #   run_unit_tests, delete_object) + generate_objects / create_transport
+    └── server.ts            # McpServer + 39 tools (federated reads unwrap via federated()): reads (health,
+    │                        #   list_destinations, list_creatable_objects, search_objects, list_inactive_objects,
+    │                        #   list_users, list_generators, get_generator_schema, get_object_type_details,
+    │                        #   get_service_binding, get_service_details, read_source, validate_object, find_transport)
+    │                        #   + code-intel (document_symbols, go_to_definition, go_to_declaration, find_references,
+    │                        #   type_hierarchy, hover, document_highlight, check_syntax, completion)
+    │                        #   + quality (run_atc, list_atc_variants, run_unit_tests_with_coverage)
+    │                        #   + runtime/services (run_application, service_binding_details, publish_service_binding)
+    │                        #   + authoring loop (create_object, update_source, activate_object, run_unit_tests,
+    │                        #   delete_object) + generate_objects + transport (find_transport, create_transport,
+    │                        #   assign_transport, list_transports, get_lock_status)
     │                        #   — mutations gated by ARC1_ALLOW_WRITES (+ ARC1_ALLOW_TRANSPORT_WRITES) + pkg allowlist
 tests/unit/…                 # vitest; adt-ls/SAP-dependent tests are skipIf-gated
 docs/plans/…                 # ralphex plans (one per roadmap state)

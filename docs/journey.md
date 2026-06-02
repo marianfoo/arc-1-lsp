@@ -111,10 +111,37 @@ BTP CF**:
   Dockerfile; the connection step is non-fatal so a logon failure doesn't crash the
   server; `cf stop` before re-push when the org memory quota is tight.
 
-## 7. Open / next
-- **`read_source`** via LSP `adtLs/fileSystem/readFile` — the URI form
-  `adt://<dest>/sap/bc/adt/oo/classes/<n>/source/main` is accepted but returned `{}`
-  in the spike; nail the response shape (maybe needs stat/open first).
+## 7. The build-out — read_source solved → 39 tools (plans 05–11 + the reuse effort)
+The §6 "open" items closed, then the tool surface grew. Highlights + lessons:
+- **read_source / the URI lesson:** `adt://…/source/main` (double-slash ADT-path) is
+  *parsed* but *rejected* by readFile/activate. The canonical **repotree/AFF URI**
+  (`abap:/repotree-v1/<dest>/…/<obj>.clas.abap`, single slash) works. `search_objects
+  → getLsUri{adtUri} → readFile` resolves any object by name in one hop — this unblocked
+  read + the full authoring loop (create→edit→activate→test→delete in `$TMP`, live-verified).
+- **Decompiled adt-ls itself** (CFR on the bundled SAP-Machine JRE) to map the WHOLE
+  surface — 23 `adtLs/*` segments / ~92 methods, the advertised standard-LSP boundary,
+  and the embedded MCP server's static+dynamic tool collection
+  (`docs/research/adt-ls-capability-map.md`). This overturned three reverse-engineered
+  verdicts and drove the reuse effort.
+- **Wired 27 → 39 tools**, all live-verified end-to-end through the MCP server against
+  a4h: code-intel (hover/declaration/highlight + the plan-11 set), ATC + ABAP-Unit
+  coverage, run_application, service-binding details/publish, native CTS transport.
+- **Three "blocked" verdicts were OUR bugs, not SAP limits:**
+  - **hover / documentHighlight** returned null because the ABAP backend gates on the
+    `AbapDocumentTokenCache`, primed ONLY by `textDocument/semanticTokens/full` — which
+    we never sent. Prime it first → rich markdown.
+  - **ATC** "no variants" was an empty-param artifact: `getCheckVariants` rejects an
+    empty query; with `*`, a4h returns 15+ variants, and `runCheck("")` uses the system
+    default.
+  - **navigation "hangs"** was `didOpen` sent as a *request* (it's a notification).
+- **Footguns found live:** `create_transport` creates a real TR even for `$TMP` (now
+  guarded); the embedded-MCP port had no fallback (now retries); federated tool results
+  were doubly-wrapped (now unwrapped to clean payloads, errors surfaced).
+
+## 8. Open / next
+- **Enterprise auth Stage 2/3** (XSUAA JWT edge + per-user PP session pool) — staged;
+  needs a bound XSUAA + ≥2 SAP users (plan 10 / ADR-0007).
 - **CC-mode deploy** once a Cloud Connector + destination for a4h are confirmed up.
-- More curated arc-1-style tools; then per-user **principal propagation** (plan 05).
+- Reachable-but-unwired: `completionItem/resolve`, native `activation/activate`
+  (forceActivation), the `objectCreation` / `objectGenerator` LSP pipelines, `toggleVersion`.
 - H01 (valid cert, OAuth reentrance) as the BTP-native target variant.

@@ -66,21 +66,26 @@ Installed reference at time of writing: `sapse.adt-vscode` **1.0.0**, adt-ls
   the discovery/extract dance and the CI skip-gating.
 
 ## 5. adt-ls's own MCP server
-- **Current:** adt-ls embeds SAP's MCP server (14 tools, `experimental`,
-  disabled-by-default). We start it over LSP (`adtLs/mcp/startMCPServer`) and
-  federate it. SAP may enable it by default, add tools, or change the tool set
-  per backend ("IDE Actions").
+- **Current:** adt-ls embeds SAP's MCP server (`experimental`, disabled-by-default).
+  Its tool list is **7 static** extension-point tools (`abap_activate_objects`,
+  `abap_run_unit_tests`, `abap_creation-*` ×4, list-destinations) **+ a dynamic,
+  backend-driven set** harvested from the connected system's `MCP_*` IDE-Actions
+  (renamed `MCP_…`→`abap_…`) — ~14 total on a4h, but it **varies per backend**. We
+  start it over LSP (`adtLs/mcp/startMCPServer`) and federate it. (Full mechanism:
+  `docs/research/adt-ls-capability-map.md` §5.)
 - **If SAP** matures/ships this → we federate more directly; fewer custom tools
   needed. Watch the tool list per release (`docs` in main arc-1:
   `docs/research/sapse-adt-vscode-mcp.md` has the teardown).
 - **⚠ LSP code-intelligence (`adt_lsp_*`) — likely SAP duplication.** SAP's own
   prototype (Thomas Ritter) already exposes the standard `textDocument/*` methods
   as MCP tools named `adt_lsp_document_symbols`/`_go_to_definition`/`_find_references`/
-  `_hover`/`_type_hierarchy`/`_diagnostics`. Our `src/adt-ls/navigation.ts` (plan 11)
-  is the **bridge until SAP ships theirs**. **If `adt_lsp_*` appears in adt-ls's MCP
-  `tools/list`, FEDERATE SAP's tools and retire our navigation proxy** (esp. `hover`,
-  which works in SAP's prototype but returns null in our headless flow). Re-check
-  per adt-ls release; raise with SAP before investing further in the proxy.
+  `_hover`/`_type_hierarchy`/`_diagnostics`. Our `src/adt-ls/navigation.ts` (plan 11
+  + the reuse effort) is the **bridge until SAP ships theirs**. **If `adt_lsp_*`
+  appears in adt-ls's MCP `tools/list`, FEDERATE SAP's tools and retire our navigation
+  proxy.** (Note: `hover` is NOT a gap anymore — the earlier "null headless" was OUR
+  bug: ABAP hover/highlight gate on the `AbapDocumentTokenCache`, primed only by
+  `textDocument/semanticTokens/full`; `navigation.ts` now primes it and hover returns
+  rich markdown — capability-map §3a.) Re-check per adt-ls release.
 
 ## 6. The private LSP protocol (`adt-ls-client-protocol`)
 - **Current:** **unpublished** (npm 404). We reverse-engineered the requests we

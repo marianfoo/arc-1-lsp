@@ -6,9 +6,10 @@ development — that delegates **all** ABAP/ADT interaction to SAP's own embedde
 owns the MCP front-end, auth/scopes, write-safety, and orchestration; `adt-ls`
 owns CSRF, locking, XML, activation, transport — everything system-specific.
 
-> **Status:** working — connects headless to a SAP system, exposes 27 MCP tools
-> (reads + LSP code-intelligence + a full create→edit→activate→test→delete authoring
-> loop + RAP generation and transport), runs locally
+> **Status:** working — connects headless to a SAP system, exposes 39 MCP tools
+> (reads + LSP code-intelligence incl. hover · ATC + ABAP-Unit coverage · a full
+> create→edit→activate→test→delete authoring loop · RAP generation · run-application ·
+> service-binding publish · native transport), runs locally
 > over stdio or as a Docker app on SAP BTP Cloud Foundry. Single-tenant / one
 > technical user today; per-user principal propagation is on the roadmap.
 
@@ -49,8 +50,8 @@ Both are MCP servers for SAP ABAP and share the same tool shape. They differ in
 | Git (gCTS / abapGit) | ✅ | ❌ (absent in adt-ls) |
 | Maturity | Production, multi-user, write-capable | Working; reads + authoring loop; single technical user |
 
-**Use main ARC-1** for the broadest coverage (classic objects, free SQL, ATC deep
-checks, git) and production multi-user deployments. **Use arc-1-lsp** when you want
+**Use main ARC-1** for the broadest coverage (classic objects, free SQL, git,
+transport release/delete) and production multi-user deployments. **Use arc-1-lsp** when you want
 SAP itself to own the ADT protocol — less code to maintain, and behavior that
 tracks ADT exactly (including its standard LSP code-intelligence) — and your work
 is on modern ABAP-Cloud objects.
