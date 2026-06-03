@@ -138,10 +138,56 @@ The §6 "open" items closed, then the tool surface grew. Highlights + lessons:
   guarded); the embedded-MCP port had no fallback (now retries); federated tool results
   were doubly-wrapped (now unwrapped to clean payloads, errors surfaced).
 
-## 8. Open / next
+## 8. Resilience hardening — the live-test loop (2026-06-02)
+With 39 tools live, a **six-round Cursor → cloud → A4H test loop** turned the surface from
+"works in a demo" into "survives an unattended agent". Each round = real Cursor feedback →
+fix → deploy (amd64 → ghcr → `cf push`) → live-verify. The durable lessons:
+
+- **DX / shape fixes (commit `fba7c9e`).** `list_transports` was a token bomb — the native
+  `searchTransports` returns the FULL set (**950 rows** on a4h); now capped + filterable
+  (`{total,returned,truncated,…}`). Naked-value results got structured: `get_lock_status`
+  always `{lockingSupported,lockId:null}`, `run_unit_tests` wraps "No tests found" → JSON,
+  `assign_transport` → `{assigned,object,transport}`. `completion`/`type_hierarchy` strip
+  the opaque LSP `data` blob. A `SAP_*`→`ARC1_*` env-prefix startup warning (operators
+  migrating main-arc-1 configs). `list_atc_variants` needs an anchor object (documented).
+- **Cold start (commit `3df0161`).** The first repository call after connect returns `[]` /
+  throws `"Internal error"` for a few seconds (cold backend caches). Fix: `cold-retry.ts`
+  (`withColdRetry`) retries empty-or-transient with backoff, on `search`/`resolveAffUri`/
+  `listTransports`; plus a startup `warmUpBackend()`. Also: **CDS by-symbol navigation** —
+  `documentSymbol` is empty for DDLS headless, so `resolvePosition` falls back to a
+  word-boundary scan of the source; `type_hierarchy` `data` trimmed.
+- **The dead-session discovery (commits `11df1ff`, `a0f052f`, `8ad3e6f`) — the big one.**
+  After idle, EVERY call failed (`not found via search` / `Internal error`) while `health`
+  said `A4H` connected. **Root cause:** the SAP session idle-expires but adt-ls signals it
+  as **empty results / "Internal error"**, NOT the `"logged off"` string the existing
+  self-heal watched for — so nothing re-logged on. **CF logs were decisive:** the session
+  dies in **< 3 min** of idle and ONLY a re-logon revives it (a probe-retry won't). Fix
+  (ADR-0008): `makeReviveIfDead` *probes* a known object → re-logon if dead (reactive on
+  empty/Internal-error; proactive heartbeat). Then logs showed a plain heartbeat re-logged
+  on **every ~3–4 min 24/7** even when idle (~480/day) — so it became **activity-gated**
+  (only heals within 15 min of the last user call; idle servers go quiet; the next call
+  self-heals). `health.backendLive` added as an honest readiness signal (the dead-probe used
+  to leave it stuck `false`; a successful re-logon now sets it `true`). **Verified live
+  end-to-end:** idle lapse → keep-alive silent → first call self-heals (~10 s once) → hit.
+- **Lessons worth not re-discovering:** (1) a dead adt-ls session ≠ "logged off" — you MUST
+  probe, not pattern-match. (2) The session lifetime is < 3 min idle and unextendable; the
+  keep-alive *heals*, it can't *prevent*. (3) `health` reporting `connectedDestination` is
+  NOT proof the session works — that's why `backendLive` exists. Full rationale: ADR-0008;
+  capability notes: `adt-ls-reference.md` §8 list. The whole loop was **manual** — an
+  automated live regression harness is the top "next" item so this can't silently regress.
+
+## 9. Open / next
+- **Rotate the `DEVELOPER` password** (security hygiene — still the shared a4h cred).
+- **Automated live regression harness** — codify the six rounds' Cursor checks into a gated
+  e2e suite so the hardening can't regress unseen (main arc-1 has evals; arc-1-lsp doesn't).
 - **Enterprise auth Stage 2/3** (XSUAA JWT edge + per-user PP session pool) — staged;
-  needs a bound XSUAA + ≥2 SAP users (plan 10 / ADR-0007).
-- **CC-mode deploy** once a Cloud Connector + destination for a4h are confirmed up.
+  needs a bound XSUAA + ≥2 SAP users (plan 10 / ADR-0007). The single shared session is the
+  biggest gap for multi-user. (Note: ADR-0008's liveness/keep-alive must then run per pooled
+  session.)
+- **CC-mode deploy** once a Cloud Connector + destination for a4h are confirmed up (only
+  DIRECT mode is deployed; CC path is coded + unit-tested).
+- **Publishing polish** — public ghcr image (drop pull-creds), release CI, docs page.
 - Reachable-but-unwired: `completionItem/resolve`, native `activation/activate`
   (forceActivation), the `objectCreation` / `objectGenerator` LSP pipelines, `toggleVersion`.
-- H01 (valid cert, OAuth reentrance) as the BTP-native target variant.
+- H01 (valid cert, OAuth reentrance) as the BTP-native target variant; ABAP Cloud / S/4
+  Public Cloud, where adt-ls's "modern types only" boundary IS the native model.

@@ -82,7 +82,13 @@ src/
 │   │                        #   ABAP Unit coverage (runTests measurement=COVERAGE → getCoverage); timeout-guarded
 │   ├── services.ts          # runApplication (console run) + service-binding details/publish (native srvb;
 │   │                        #   readFile-warms the SFS first); publish is write-gated
-│   ├── session-retry.ts     # self-heal: detect "logged off" + re-logon & retry once (both channels)
+│   ├── cold-retry.ts        # withColdRetry: bounded backoff retry on a cold result (empty refs) OR a
+│   │                        #   transient "Internal error" (isTransientColdError). Used by quickSearch({cold})
+│   │                        #   + listTransports for the cold-backend window. See ADR-0008.
+│   ├── session-retry.ts     # self-heal: (1) withRelogon — detect "logged off" + re-logon & retry once
+│   │                        #   (both channels); (2) makeReviveIfDead — a dead session reads as EMPTY
+│   │                        #   results / "Internal error" (NOT "logged off"), so PROBE a known object →
+│   │                        #   re-logon if dead. Reactive + the keep-alive heartbeat. ADR-0008.
 │   ├── destinations.ts      # initializeService/create/ensureLoggedOn/getLogonInfo + headless
 │   │                        #   reentrance-ticket logon handler (ADR-0006)
 │   ├── tls-reverse-proxy.ts # TLS terminator: adt-ls → https://localhost → backend (direct | bridge)
@@ -103,7 +109,11 @@ src/
     ├── auth.ts              # API-key edge auth (Bearer | x-api-key)
     ├── http.ts              # http-streamable transport + API-key gate + /healthz
     ├── engine.ts            # discover→spawn→startMCP→federate; planConnection + connect (direct|CC); search/listInactive;
-    │                        #   self-heal re-logon on lost SAP session (reconnect(), wraps both channels)
+    │                        #   resilience (ADR-0008): warmUpBackend() primes cold caches at boot; probeLive +
+    │                        #   reviveIfDead heal a dead session (reactive on empty/"Internal error" + an
+    │                        #   ACTIVITY-GATED keep-alive — heartbeat only within 15 min of the last user call,
+    │                        #   else idle servers re-logon 24/7); health.backendLive = last-known liveness;
+    │                        #   reconnect() = manual re-logon. self-heal "logged off" via session-retry too.
     └── server.ts            # McpServer + 39 tools (federated reads unwrap via federated()): reads (health,
     │                        #   list_destinations, list_creatable_objects, search_objects, list_inactive_objects,
     │                        #   list_users, list_generators, get_generator_schema, get_object_type_details,
@@ -154,11 +164,18 @@ adt-ls's JRE) are runtime deps — `openssl` is in the Dockerfile.
   `SAML_WITH_REENTRANCE_TICKET`. The VS Code UI only exposes SSO/reentrance;
   basic auth is configurable in `destinations.json` (used for the fixed-user
   deploy and the per-user PP proxy).
-- **SAP session expires on inactivity** → every call then fails "Your user was
-  logged off" until re-logon. There is no `logoff` method; `ensureLoggedOn`
-  re-fires the registered reentrance handler and heals it. arc-1-lsp does this
-  automatically (`session-retry.ts`, `engine.reconnect()`) — detect, re-logon,
-  retry once. Full evidence: `docs/adt-ls-reference.md` §7.
+- **SAP session expires on inactivity, FAST, and silently** (live: a4h dies in < 3 min
+  idle) → every call then fails until re-logon. There is no `logoff`/refresh method;
+  `ensureLoggedOn` re-fires the registered reentrance handler and heals it. **CRITICAL
+  nuance (ADR-0008):** the death does NOT always announce itself as "Your user was logged
+  off" — most often repository searches just return **empty** and CTS throws **"Internal
+  error"**, while `health` still reports the destination connected. So liveness detection
+  must **probe a known object** (`makeReviveIfDead`), not pattern-match an error string.
+  arc-1-lsp heals automatically: reactive revive on a persistent empty/"Internal error"
+  + an **activity-gated keep-alive** (warm during use, quiet when idle, self-heal on the
+  next call) + `health.backendLive` as the real readiness signal. `engine.reconnect()` is
+  the manual lever. The plain "logged off" path is still handled by `session-retry.ts`'s
+  `withRelogon`. Full evidence: `docs/adt-ls-reference.md` §7–§8, ADR-0008.
 
 ## Workflow (the loop)
 

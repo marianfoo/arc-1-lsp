@@ -166,6 +166,16 @@ and explicit HTTP 401 (not bare `401`, to avoid false positives).
 > a4h) rather than a forced-expiry test. If a future adt-ls makes `ensureLoggedOn`
 > no-op when it *believes* it is connected, add a getLogonInfo-gated forced re-auth.
 
+> **⚠ Correction + escalation (2026-06-02, ADR-0008):** the "~hours / only a restart
+> recovers" claim above is SUPERSEDED. On a4h the session dies in **< 3 min** of idle, and
+> the failure most often does **NOT** carry the "logged off" string — repository searches
+> return **empty** and CTS throws **"Internal error"** while `health` still says connected.
+> So the §7 string-matching self-heal (`withRelogon`) is necessary but **not sufficient**:
+> a dead session must be detected by **probing a known object** (`makeReviveIfDead`), and
+> the heal runs both reactively (on a persistent empty/"Internal error") and via an
+> **activity-gated keep-alive**. No restart is ever needed now. The full model + the
+> cold-start retry + `health.backendLive` are in §8's resilience bullets and **ADR-0008**.
+
 ## 8. What this means for arc-1-lsp (wired tools)
 
 - **Reads (live):** search_objects, read_source, list_users, list_inactive_objects,

@@ -17,6 +17,8 @@ what failed, why) behind these decisions.
 | [0004](0004-container-cf-apikey.md) | **Docker image on CF**, API-key edge auth for v1 | XSUAA needed; non-CF target |
 | [0005](0005-auth-injecting-proxy.md) | **arc-1-lsp owns auth** via a local injecting proxy; adt-ls talks to localhost | adt-ls gains non-interactive / token / native-BTP auth |
 | [0006](0006-headless-reentrance-logon.md) | Headless logon by **emulating the reentrance-ticket browser flow**; HTTPS required | adt-ls adds a headless/basic/token logon mode |
+| [0007](0007-enterprise-auth-scopes-xsuaa-pp.md) | **Enterprise auth**, staged: scope model (done) → XSUAA edge → per-user PP session pool | a bound XSUAA + ≥2 SAP users to verify Stages 2–3 |
+| [0008](0008-session-resilience-liveness-keepalive.md) | **Session resilience** — liveness-probe heal + activity-gated keep-alive (a dead session = empty results, not "logged off") | adt-ls exposes session-status/refresh or a longer-lived token logon |
 
 ## Format
 
