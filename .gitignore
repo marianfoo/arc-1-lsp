@@ -8,3 +8,7 @@ vendor/
 .cursor/
 # Internal BTP/CF setup notes (orgs, spaces, destinations, users) — never committed
 docs/internal-setup.md
+
+# Infra access files synced from ../arc-1 via .worktreeinclude (never commit — system hosts/creds)
+.env.infrastructure
+INFRASTRUCTURE.md

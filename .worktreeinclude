@@ -1,0 +1,11 @@
+# Copy gitignored files into Claude Code worktrees at creation time.
+# Patterns use .gitignore syntax; ONLY files that are also gitignored get copied.
+# Mirrors ../arc-1/.worktreeinclude. Keep in sync when the infra files move/rename.
+
+# Local env / credentials (SAP, BTP, Cloud Connector, infrastructure)
+.env
+.env.local
+.env.infrastructure
+
+# Infrastructure access catalog (synced from ../arc-1; gitignored — holds system hosts/creds)
+INFRASTRUCTURE.md
