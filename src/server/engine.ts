@@ -134,9 +134,11 @@ function wrapLifecycle(client: AdtLsClient, safety: WriteSafety): EngineLifecycl
 }
 
 function wrapServices(client: AdtLsClient, safety: WriteSafety): AdtLsClient['services'] {
+  // Spread the lib's services (so additive read methods like listServices/getServiceInfo
+  // flow through automatically + stay forward-compatible across lib versions) and gate
+  // only the mutating one.
   return {
-    runApplication: client.services.runApplication,
-    serviceBindingDetails: client.services.serviceBindingDetails,
+    ...client.services,
     publishServiceBinding: (ref) => {
       assertWriteAllowed(safety, { action: 'publish_service_binding' });
       return client.services.publishServiceBinding(ref);
