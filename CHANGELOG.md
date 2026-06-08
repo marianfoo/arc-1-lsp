@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.2.0](https://github.com/marianfoo/arc-1-lsp/compare/arc-1-lsp-v0.1.0...arc-1-lsp-v0.2.0) (2026-06-08)
+
+
+### Features
+
+* adopt @marianfoo/adt-ls — engine becomes a thin adapter ([#3](https://github.com/marianfoo/arc-1-lsp/issues/3)) ([00a257f](https://github.com/marianfoo/arc-1-lsp/commit/00a257f87cf0bb02987aa5f24f4886c6960a9a85))
+* **lsp:** hover, document_highlight, go_to_declaration (semanticTokens-primed) ([11d799d](https://github.com/marianfoo/arc-1-lsp/commit/11d799d9e39508e2df1c88337e1feecc8b820cae))
+* **quality:** ATC (run_atc/list_atc_variants) + ABAP Unit coverage ([da2782b](https://github.com/marianfoo/arc-1-lsp/commit/da2782bde5d1567bb5300ff7f7faf42027611b6b))
+* **server:** unwrap federated tool results to clean payloads ([e761d35](https://github.com/marianfoo/arc-1-lsp/commit/e761d35a838ea69f91e758a41927b10670ae20f7))
+* **services:** run_application + service-binding details/publish (native srvb) ([6449c3f](https://github.com/marianfoo/arc-1-lsp/commit/6449c3f9b68dc62a2880166c6440bd468c94e94f))
+* **transport:** native CTS transport list/assign + object lock status ([29d8e16](https://github.com/marianfoo/arc-1-lsp/commit/29d8e161d68fce19d31af0afdc5f762ca9638d8c))
+
+
+### Bug Fixes
+
+* **cold-start:** warm-up + robust retry; CDS symbol fallback; trim type_hierarchy ([3df0161](https://github.com/marianfoo/arc-1-lsp/commit/3df016174bb63a953b3c97187b16e55270cbf579))
+* **engine:** fall back to the next MCP port when the configured one is busy ([f542346](https://github.com/marianfoo/arc-1-lsp/commit/f542346b30ddc3e6fd6cfe31cc42f6e5e7801a69))
+* **session:** accurate backendLive + 3-min keep-alive to avoid re-logon churn ([a0f052f](https://github.com/marianfoo/arc-1-lsp/commit/a0f052f1fbae5d9e16c6ff71c0734c256c3a6006))
+* **session:** activity-gate the keep-alive to stop idle re-logon churn ([8ad3e6f](https://github.com/marianfoo/arc-1-lsp/commit/8ad3e6f3ae68b71ac3ebe40bfebb511bbf1e25c7))
+* **session:** heal dead (idle-expired) SAP sessions + keep-alive heartbeat ([11df1ff](https://github.com/marianfoo/arc-1-lsp/commit/11df1ff0b55c1a3ed09dd52e4f571d4468c475e8))
+* **tools:** address Cursor re-test DX findings ([fba7c9e](https://github.com/marianfoo/arc-1-lsp/commit/fba7c9efb33b28a62bbe3701964952bfb21ab574))
+* **transport:** refuse create_transport for local ($-prefixed) packages ([df7d89f](https://github.com/marianfoo/arc-1-lsp/commit/df7d89fb33593ba5dbb4cc434f42ed1d13ccb568))
+
 ## [0.1.0](https://github.com/marianfoo/arc-1-lsp/compare/arc-1-lsp-v0.0.1...arc-1-lsp-v0.1.0) (2026-06-01)
 
 

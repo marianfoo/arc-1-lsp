@@ -3,7 +3,7 @@
  * the marker below — keep the literal on one line) and the adt-ls release this
  * build was verified against.
  */
-export const VERSION = '0.1.0'; // x-release-please-version
+export const VERSION = '0.2.0'; // x-release-please-version
 
 /**
  * The `sapse.adt-vscode` adt-ls build arc-1-lsp's reverse-engineered `adtLs/*`
