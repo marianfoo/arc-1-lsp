@@ -1,46 +1,17 @@
 /**
- * The arc-1-lsp engine: discovers a developer-provided adt-ls, spawns it
- * headless, starts adt-ls's own MCP server over LSP, and connects a federation
- * client to it. All ABAP/ADT work happens inside adt-ls — arc-1-lsp orchestrates.
+ * The arc-1-lsp engine — a thin adapter over `@marianfoo/adt-ls`'s `createAdtLs()`. The
+ * library owns discovery, the TLS reverse proxy + truststore, the driver, reentrance
+ * logon, adt-ls MCP federation, and session resilience (relogon / revive / keep-alive).
  *
- * When a SAP target is configured, the engine also performs the headless
- * connection (ADR-0005/0006): build TLS material from adt-ls's own JRE, start a
- * TLS-terminating reverse proxy, spawn adt-ls trusting it, then create the
- * destination + reentrance-logon + bind it to adt-ls's MCP server. Two paths:
- *   - DIRECT (local, ARC1_SAP_*): reverse proxy connects straight to the backend.
- *   - CONNECTIVITY (CF, ARC1_SAP_DESTINATION + bound connectivity): resolve the
- *     BTP destination, start the connectivity bridge, and forward the reverse
- *     proxy's upstream through it → Cloud Connector → backend.
+ * arc-1-lsp keeps only its own concerns:
+ *   - the BTP / Cloud-Connector path → plugged into the lib's `connection.forwardProxy`
+ *     hook (the bridge stays here; the lib forwards through it),
+ *   - write-safety → re-applied here as a thin wrapper, since the lib does NOT gate
+ *     writes (consumer policy, ADR-0012),
+ *   - foundation mode (no SAP) + non-fatal connection failure → the lib's connection-less
+ *     `createAdtLs()` (adt-ls + MCP up, no destination).
  */
-import crypto from 'node:crypto';
-import { promises as fsp } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { prepareAdtLsTls } from '../adt-ls/cert.js';
-import {
-  type LogonCredentials,
-  REQUEST_BROWSER_LOGON,
-  createDestination,
-  ensureLoggedOn,
-  initializeDestinationsService,
-  makeReentranceLogonHandler,
-} from '../adt-ls/destinations.js';
-import { resolveAdtLsPath } from '../adt-ls/discovery.js';
-import { AdtLsDriver, type LspClient, type LspRequester } from '../adt-ls/driver.js';
-import { type Lifecycle, createLifecycle } from '../adt-ls/lifecycle.js';
-import { AdtLsMcpClient, type McpTool } from '../adt-ls/mcp-federation.js';
-import {
-  type StartMcpServerResult,
-  setMcpDestination,
-  startMcpServer,
-  stopMcpServer,
-} from '../adt-ls/mcp-lifecycle.js';
-import { type Navigation, createNavigation } from '../adt-ls/navigation.js';
-import { type Quality, createQuality } from '../adt-ls/quality.js';
-import { type SearchReference, type UserRef, getInactiveObjects, getUsers, quickSearch } from '../adt-ls/repository.js';
-import { type Services, createServices } from '../adt-ls/services.js';
-import { isLoggedOffFederatedResult, makeRelogon, makeReviveIfDead, makeWithRelogon } from '../adt-ls/session-retry.js';
-import { type TlsReverseProxy, startTlsReverseProxy } from '../adt-ls/tls-reverse-proxy.js';
+import { type AdtLsClient, type SearchReference, type UserRef, basic, createAdtLs } from '@marianfoo/adt-ls';
 import { type ConnectivityBridge, startConnectivityBridge } from '../btp/bridge.js';
 import { createConnectivityProxy } from '../btp/connectivity.js';
 import { lookupDestination } from '../btp/destination.js';
@@ -49,67 +20,52 @@ import { parseVCAPServices } from '../btp/vcap.js';
 import { warnOnAdtLsVersionMismatch } from '../version.js';
 import type { Arc1LspConfig, SapTargetConfig } from './config.js';
 import { logger } from './logger.js';
+import { type WriteSafety, assertWriteAllowed } from './safety.js';
 
 export interface EngineHealth {
   adtLs: { name?: string; version?: string; up: boolean };
   mcpPort: number;
   connectedDestination?: string;
-  /**
-   * Last-known SAP backend liveness (a real repository round-trip succeeded). Distinct
-   * from `connectedDestination`, which only means the destination metadata is configured
-   * — the session behind it can die on idle while the destination still "looks" connected.
-   * `undefined` until the first probe/search; refreshed by the keep-alive + every search.
-   */
+  /** Last-known SAP backend liveness (a real round-trip succeeded). Distinct from
+   * `connectedDestination`, whose session can die on idle while metadata still "looks"
+   * connected. Refreshed by the keep-alive + every search. */
   backendLive?: boolean;
 }
 
-/** Keep-alive cadence. Live logs showed the SAP session behind adt-ls dies in <3 min of
- * idle and ONLY a full re-logon revives it (a probe-retry doesn't), so the heartbeat can't
- * prevent the death — it heals it. To avoid re-logging on 24/7 on an idle server, the
- * heartbeat is ACTIVITY-GATED: it only runs within KEEPALIVE_ACTIVITY_WINDOW_MS of the last
- * user call. Past that, the session is allowed to lapse and the next user call self-heals
- * via the reactive revive (one-time ~re-logon cost on that call). */
-const KEEPALIVE_INTERVAL_MS = 180_000; // 3 min — under the <3-min death, so warm calls stay fast during use
-const KEEPALIVE_ACTIVITY_WINDOW_MS = 900_000; // 15 min — keep warm this long after the last user call
+/** The lifecycle surface server.ts expects (arc-1 method names), over the lib client. */
+export interface EngineLifecycle {
+  resolveAffUri: AdtLsClient['lifecycle']['resolveAffUri'];
+  readSource: AdtLsClient['source']['read'];
+  createObject: AdtLsClient['lifecycle']['create'];
+  updateSource: AdtLsClient['lifecycle']['update'];
+  activate: AdtLsClient['lifecycle']['activate'];
+  runUnitTests: AdtLsClient['lifecycle']['runUnitTests'];
+  deleteObject: AdtLsClient['lifecycle']['delete'];
+  generateObjects: AdtLsClient['lifecycle']['generate'];
+  validateObject: AdtLsClient['lifecycle']['validate'];
+  findTransport: AdtLsClient['transport']['find'];
+  createTransport: AdtLsClient['transport']['create'];
+  listTransports: AdtLsClient['transport']['list'];
+  getLockStatus: AdtLsClient['transport']['getLockStatus'];
+  assignTransport: AdtLsClient['transport']['assign'];
+}
 
 export interface Engine {
   health(): EngineHealth;
-  listTools(): Promise<McpTool[]>;
   callTool(name: string, args?: Record<string, unknown>): Promise<unknown>;
-  setDestination(destinationId: string): Promise<void>;
-  /** Repository object search (LSP quickSearch) on the connected destination. */
+  /** Repository object search on the connected destination (returns the references). */
   search(pattern: string, opts?: { maxResults?: number; types?: string[] }): Promise<SearchReference[]>;
-  /** Inactive (draft) objects on the connected destination (LSP). */
   listInactiveObjects(): Promise<unknown[]>;
-  /** System users on the connected destination (LSP). */
   listUsers(): Promise<UserRef[]>;
-  /** ABAP object authoring lifecycle (read/create/update/activate/test/delete). */
-  lifecycle: Lifecycle;
-  /** Raw LSP client (request + notification) for code-intelligence (didOpen → query → didClose). */
-  lsp: LspClient;
-  /** LSP code-intelligence: document symbols, definition, references, type hierarchy, syntax check, completion. */
-  navigation: Navigation;
-  /** Quality & test: ATC static analysis, ABAP Unit code coverage. */
-  quality: Quality;
-  /** Runtime & business services: run application (console), service-binding details/publish. */
-  services: Services;
-  /** The destination logged on at startup, if any. */
+  lifecycle: EngineLifecycle;
+  navigation: AdtLsClient['navigation'];
+  quality: AdtLsClient['quality'];
+  services: AdtLsClient['services'];
+  /** The destination connected at startup, if any. */
   connectedDestination?: string;
-  /**
-   * Force a SAP re-logon on the connected destination; resolves true when the
-   * session is live afterwards. Invoked automatically on a detected "logged off"
-   * (see the session-retry wrappers), and exposed for ops / manual recovery.
-   */
+  /** Force a SAP re-logon; resolves true when the session is live afterwards. */
   reconnect(): Promise<boolean>;
   dispose(): Promise<void>;
-}
-
-/** Minimal info needed to create + logon a destination (mode-agnostic). */
-export interface BackendDescriptor {
-  destinationId: string;
-  user?: string;
-  client: string;
-  language: string;
 }
 
 export type ConnectionPlan =
@@ -118,8 +74,8 @@ export type ConnectionPlan =
   | { mode: 'connectivity'; destinationName: string };
 
 /**
- * Decide how to connect (pure). On BTP (connectivity bound) a destination name
- * wins → Cloud-Connector path. Otherwise a full local target → direct. Else none.
+ * Decide how to connect (pure). On BTP (connectivity bound) a destination name wins →
+ * Cloud-Connector path. Otherwise a full local target → direct. Else none.
  */
 export function planConnection(config: Arc1LspConfig, btp: BTPConfig | null): ConnectionPlan {
   const onBtp = !!btp?.connectivityProxyHost;
@@ -128,381 +84,173 @@ export function planConnection(config: Arc1LspConfig, btp: BTPConfig | null): Co
   return { mode: 'none' };
 }
 
-/**
- * Start adt-ls's MCP server, falling back to the next port when the requested one is
- * already bound — concurrent arc-1-lsp instances, a leftover bind, or parallel live
- * tests all contend for the default port. Tries `attempts` consecutive ports; only a
- * bind-failure is retried (any other error rethrows immediately). Injectable `start`
- * (port → result) keeps it unit-testable. Returns the EFFECTIVE port adt-ls bound.
- */
-export async function startMcpWithPortFallback(
-  start: (port: number) => Promise<StartMcpServerResult>,
-  startPort: number,
-  attempts = 20,
-  onRetry: (busyPort: number) => void = () => {},
-): Promise<StartMcpServerResult> {
-  let lastErr: unknown;
-  for (let i = 0; i < attempts; i++) {
-    const port = startPort + i;
-    try {
-      return await start(port);
-    } catch (e) {
-      lastErr = e;
-      const msg = e instanceof Error ? e.message : String(e);
-      if (!/failed to bind|address already in use|eaddrinuse/i.test(msg)) throw e;
-      onRetry(port);
-    }
-  }
-  throw lastErr;
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** Wrap the lib's lifecycle/transport with arc-1-lsp's write-safety (ADR-0012). */
+function wrapLifecycle(client: AdtLsClient, safety: WriteSafety): EngineLifecycle {
+  const lc = client.lifecycle;
+  const tr = client.transport;
+  return {
+    resolveAffUri: lc.resolveAffUri,
+    readSource: client.source.read,
+    validateObject: lc.validate,
+    findTransport: tr.find,
+    listTransports: tr.list,
+    getLockStatus: tr.getLockStatus,
+    runUnitTests: lc.runUnitTests,
+    createObject: (a) => {
+      assertWriteAllowed(safety, { action: 'create_object', packageName: a.packageName });
+      return lc.create(a);
+    },
+    updateSource: (a) => {
+      assertWriteAllowed(safety, { action: 'update_source' });
+      return lc.update(a);
+    },
+    activate: (a) => {
+      assertWriteAllowed(safety, { action: 'activate_object' });
+      return lc.activate(a);
+    },
+    deleteObject: (a) => {
+      assertWriteAllowed(safety, { action: 'delete_object' });
+      return lc.delete(a);
+    },
+    generateObjects: (a) => {
+      assertWriteAllowed(safety, { action: 'generate_objects', packageName: a.packageName });
+      return lc.generate(a);
+    },
+    createTransport: (a) => {
+      assertWriteAllowed(safety, {
+        action: 'create_transport',
+        packageName: a.developmentPackage,
+        requireTransportWrites: true,
+      });
+      return tr.create(a);
+    },
+    assignTransport: (a) => {
+      assertWriteAllowed(safety, { action: 'assign_transport', requireTransportWrites: true });
+      return tr.assign(a);
+    },
+  };
 }
 
-/**
- * Prime the cold SAP-side caches so the FIRST user call after a fresh connect isn't a
- * cold miss (search returns [] / CTS throws "Internal error" until warm — verified live).
- * Loops a cheap repository search until it yields a hit (the cold window needs several
- * tries), then warms the CTS path once. Bounded by `attempts` AND `timeoutMs`; entirely
- * best-effort — every error is swallowed and the engine starts regardless. The per-call
- * cold-retry on the user path is the backstop for any residual / post-idle coldness.
- */
-export async function warmUpBackend(
-  engine: Pick<Engine, 'search' | 'lifecycle'>,
-  opts: { attempts?: number; timeoutMs?: number; sleep?: (ms: number) => Promise<void> } = {},
-): Promise<void> {
-  const attempts = opts.attempts ?? 4;
-  const timeoutMs = opts.timeoutMs ?? 12_000;
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const start = Date.now();
-  for (let i = 0; i < attempts && Date.now() - start < timeoutMs; i++) {
+function wrapServices(client: AdtLsClient, safety: WriteSafety): AdtLsClient['services'] {
+  return {
+    runApplication: client.services.runApplication,
+    serviceBindingDetails: client.services.serviceBindingDetails,
+    publishServiceBinding: (ref) => {
+      assertWriteAllowed(safety, { action: 'publish_service_binding' });
+      return client.services.publishServiceBinding(ref);
+    },
+  };
+}
+
+/** Build a CONNECTED lib client per the plan (DIRECT or Cloud-Connector). */
+async function buildConnectedClient(
+  plan: Exclude<ConnectionPlan, { mode: 'none' }>,
+  btp: BTPConfig | null,
+  config: Arc1LspConfig,
+): Promise<{ client: AdtLsClient; bridge?: ConnectivityBridge }> {
+  if (plan.mode === 'connectivity') {
+    const dest = await lookupDestination(btp as BTPConfig, plan.destinationName);
+    const proxyCfg = createConnectivityProxy(btp as BTPConfig, dest.CloudConnectorLocationId);
+    if (!proxyCfg) throw new Error('connectivity service binding missing onpremise_proxy_host');
+    const bridge = await startConnectivityBridge(proxyCfg);
     try {
-      const hits = await engine.search('CL_ABAP_TYPEDESCR', { maxResults: 1 });
-      if (hits.length) break;
-    } catch {
-      /* cold throw — try again until attempts/timeout exhausted */
+      const client = await createAdtLs({
+        adtLs: { path: config.adtLsPath },
+        connection: {
+          systemUrl: dest.URL,
+          selfSigned: true, // localhost TLS proxy → forward through the CC bridge
+          forwardProxy: { host: '127.0.0.1', port: bridge.port },
+          client: dest['sap-client'] ?? '001',
+          language: 'EN',
+        },
+        auth: basic(dest.User ?? '', dest.Password ?? ''),
+        destinationId: plan.destinationName,
+        mcpPort: config.adtLsMcpPort,
+      });
+      return { client, bridge };
+    } catch (e) {
+      await bridge.close().catch(() => {});
+      throw e;
     }
-    if (i < attempts - 1) await sleep(800);
   }
-  await engine.lifecycle.listTransports({ limit: 1 }).catch(() => {});
+  const t = plan.target;
+  const client = await createAdtLs({
+    adtLs: { path: config.adtLsPath },
+    connection: {
+      systemUrl: `https://${t.host}:${t.port}`,
+      selfSigned: t.insecure,
+      client: t.client,
+      language: t.language,
+    },
+    auth: basic(t.user, t.password),
+    destinationId: t.destinationId,
+    mcpPort: config.adtLsMcpPort,
+  });
+  return { client };
 }
 
 export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
-  const bin = resolveAdtLsPath({ explicitPath: config.adtLsPath });
-  logger.info(`engine: using adt-ls at ${bin}`);
-
   const btp = parseVCAPServices();
   const plan = planConnection(config, btp);
-
-  // TLS material must exist before adt-ls spawns (JAVA_TOOL_OPTIONS truststore).
-  let tlsWorkDir: string | undefined;
-  let proxyKeyPem: string | undefined;
-  let proxyCertPem: string | undefined;
-  const driverOpts: ConstructorParameters<typeof AdtLsDriver>[1] = {};
-  if (plan.mode !== 'none') {
-    tlsWorkDir = path.join(os.tmpdir(), `arc1lsp-tls-${crypto.randomBytes(6).toString('hex')}`);
-    const tls = await prepareAdtLsTls({ adtLsBin: bin, workDir: tlsWorkDir });
-    proxyKeyPem = tls.proxyKeyPem;
-    proxyCertPem = tls.proxyCertPem;
-    driverOpts.extraEnv = { JAVA_TOOL_OPTIONS: tls.javaToolOptions };
-  }
-
-  const driver = new AdtLsDriver(bin, driverOpts);
-  const init = await driver.start();
-  warnOnAdtLsVersionMismatch(init.serverInfo?.version, (m) => logger.warn(`engine: ${m}`));
-
-  const token = config.adtLsMcpToken || crypto.randomBytes(24).toString('hex');
-  const started = await startMcpWithPortFallback(
-    (port) => startMcpServer(driver, { port, token }),
-    config.adtLsMcpPort,
-    20,
-    (busyPort) => logger.warn(`engine: adt-ls MCP port ${busyPort} busy — trying ${busyPort + 1}`),
-  );
-  logger.info(`engine: adt-ls MCP server on http://localhost:${started.port}/mcp`);
-
-  const federation = new AdtLsMcpClient(`http://localhost:${started.port}/mcp`, started.token);
-  await federation.connect();
-
-  let proxy: TlsReverseProxy | undefined;
-  let bridge: ConnectivityBridge | undefined;
-  let connectedDestination: string | undefined;
-
-  if (plan.mode !== 'none') {
-    // Non-fatal: a logon/connectivity failure must NOT crash the MCP server —
-    // health/tools still come up (reporting disconnected) so it's diagnosable.
-    try {
-      const conn = await connect(plan, btp, driver, {
-        keyPem: proxyKeyPem as string,
-        certPem: proxyCertPem as string,
-        tlsWorkDir: tlsWorkDir as string,
-      });
-      proxy = conn.proxy;
-      bridge = conn.bridge;
-      connectedDestination = conn.destinationId;
-    } catch (e) {
-      logger.error(
-        `engine: SAP connection failed (server starts disconnected): ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
-  }
-
-  // Last-known SAP backend liveness, surfaced in health(). Declared here (before
-  // relogon) so a successful re-logon can mark the session live again — otherwise the
-  // dead-probe that triggered the re-logon would leave backendLive stuck false even
-  // though the session is now healed (the keep-alive heals every cycle, so health would
-  // otherwise read false between calls). Set true on any successful round-trip/re-logon.
-  let backendLive: boolean | undefined;
-
-  // Self-healing SAP session: the backend security session behind adt-ls expires
-  // on inactivity; afterwards every call fails with "logged off" until a reconnect
-  // (previously: restart the instance). On detecting that, re-fire the proven
-  // startup logon (ensureLoggedOn re-triggers our still-registered reentrance
-  // handler) and retry the call once. Wrap BOTH channels — federated MCP tool
-  // calls and raw LSP requests — since either can hit the dead session.
-  const relogon = makeRelogon(async () => {
-    if (!connectedDestination) return false;
-    logger.warn(`engine: SAP session lost — re-logging on to ${connectedDestination}`);
-    try {
-      const logon = await ensureLoggedOn(driver, connectedDestination);
-      if (logon.logonState !== 'connected') {
-        logger.error(`engine: re-logon to ${connectedDestination} returned ${logon.logonState}`);
-        return false;
-      }
-      // Re-point adt-ls's MCP server at the refreshed session (idempotent, best-effort).
-      await setMcpDestination(driver, connectedDestination).catch((e) =>
-        logger.warn(`engine: re-bind after re-logon failed: ${e instanceof Error ? e.message : String(e)}`),
-      );
-      logger.info(`engine: re-logon to ${connectedDestination} succeeded`);
-      backendLive = true; // session is healed → reflect it (don't leave the dead-probe's false)
-      return true;
-    } catch (e) {
-      logger.error(`engine: re-logon failed: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
-    }
-  });
-  const withRelogon = makeWithRelogon(relogon);
-  // Activity-gated keep-alive: track the last USER-initiated backend call so the
-  // heartbeat only keeps the session warm while it's actually being used, and goes
-  // quiet (no background re-logon churn) once idle. The keep-alive's own probe must
-  // NOT count as activity (it uses the raw `driver`, below) or it would self-perpetuate.
-  let lastActivityAt = Date.now();
-  const markActivity = (): void => {
-    lastActivityAt = Date.now();
-  };
-  const sessionCallTool = (name: string, args: Record<string, unknown> = {}) => {
-    markActivity();
-    return withRelogon(() => federation.callTool(name, args), isLoggedOffFederatedResult);
-  };
-  const sessionRequester: LspRequester = {
-    sendRequest: <T>(method: string, params?: unknown) => {
-      markActivity();
-      return withRelogon<T>(() => driver.sendRequest<T>(method, params));
-    },
-  };
-  // Code-intelligence LSP client: relogon-wrapped requests + raw notifications
-  // (didOpen/didClose are fire-and-forget, no response to retry).
-  const lsp: LspClient = {
-    sendRequest: <T>(method: string, params?: unknown) => {
-      markActivity();
-      return withRelogon<T>(() => driver.sendRequest<T>(method, params));
-    },
-    sendNotification: (method: string, params?: unknown) => driver.sendNotification(method, params),
-  };
-
-  // Dead-session detection. An idle-expired session manifests as EMPTY repository
-  // results / CTS "Internal error" — NOT the "logged off" string `withRelogon` watches
-  // for — while `health` still reports the destination connected. Probe a known-present
-  // object; an empty/failed probe ⇒ dead ⇒ re-logon. `backendLive` (declared above) is
-  // the last-known liveness (surfaced in health); used both reactively (per request) and
-  // proactively (keep-alive heartbeat below). The probe uses the RAW `driver` (not
-  // sessionRequester) so it doesn't mark activity — otherwise the heartbeat would keep
-  // itself alive forever and never let an idle session lapse.
-  const probeLive = async (): Promise<boolean> => {
-    if (!connectedDestination) return false;
-    try {
-      const r = await quickSearch(
-        driver,
-        { destination: connectedDestination, pattern: 'CL_ABAP_TYPEDESCR', maxResults: 1 },
-        { cold: true },
-      );
-      backendLive = (r.references?.length ?? 0) > 0;
-    } catch {
-      backendLive = false;
-    }
-    return backendLive;
-  };
-  const reviveIfDead = makeReviveIfDead(probeLive, relogon, (m) => logger.warn(`engine: ${m}`));
-
-  const safety = {
+  const safety: WriteSafety = {
     allowWrites: config.allowWrites,
     allowTransportWrites: config.allowTransportWrites,
     allowedPackages: config.allowedPackages,
   };
-  const lifecycle = createLifecycle({
-    driver: sessionRequester,
-    callTool: sessionCallTool,
-    destination: () => connectedDestination,
-    safety,
-    reviveIfDead,
-  });
-  const navigation = createNavigation({ lsp, lifecycle });
-  const quality = createQuality({ lsp, lifecycle });
-  const services = createServices({ lsp, lifecycle, safety });
 
-  let keepAlive: ReturnType<typeof setInterval> | undefined;
-
-  const engine: Engine = {
-    connectedDestination,
-    lifecycle,
-    lsp,
-    navigation,
-    quality,
-    services,
-    health: () => ({
-      adtLs: { name: init.serverInfo?.name, version: init.serverInfo?.version, up: true },
-      mcpPort: started.port,
-      connectedDestination,
-      backendLive,
-    }),
-    listTools: () => federation.listTools(),
-    callTool: (name, args = {}) => sessionCallTool(name, args),
-    setDestination: async (destinationId) => {
-      await setMcpDestination(driver, destinationId);
-    },
-    search: async (pattern, opts = {}) => {
-      const d = connectedDestination;
-      if (!d) throw new Error('No ABAP destination is connected.');
-      // cold:true = retry empty/transient on the cold window. If STILL empty, the session
-      // may have died (idle-expired → adt-ls returns [] not "logged off"): probe + re-logon,
-      // then search once more. A genuine no-match: probe finds the session alive → return [].
-      const doSearch = () =>
-        quickSearch(
-          sessionRequester,
-          { destination: d, pattern, maxResults: opts.maxResults, types: opts.types },
-          { cold: true },
-        );
-      let r = await doSearch();
-      if ((r.references?.length ?? 0) === 0 && (await reviveIfDead())) r = await doSearch();
-      if ((r.references?.length ?? 0) > 0) backendLive = true;
-      return r.references ?? [];
-    },
-    listInactiveObjects: async () => {
-      if (!connectedDestination) throw new Error('No ABAP destination is connected.');
-      return getInactiveObjects(sessionRequester, connectedDestination);
-    },
-    listUsers: async () => {
-      if (!connectedDestination) throw new Error('No ABAP destination is connected.');
-      return getUsers(sessionRequester, connectedDestination);
-    },
-    reconnect: () => relogon(),
-    dispose: async () => {
-      if (keepAlive) clearInterval(keepAlive);
-      await stopMcpServer(driver).catch(() => {});
-      await driver.dispose();
-      await proxy?.close().catch(() => {});
-      await bridge?.close().catch(() => {});
-      if (tlsWorkDir) await fsp.rm(tlsWorkDir, { recursive: true, force: true }).catch(() => {});
-    },
-  };
-
-  // Prime cold SAP caches before we start serving, so the first user call (search/
-  // hover/list_transports) doesn't hit the cold window. Best-effort + time-bounded.
-  if (connectedDestination) {
-    logger.info('engine: warming backend caches…');
-    await warmUpBackend(engine).catch(() => {});
-    // One probe so backendLive reflects reality on the very FIRST health (warm-up may
-    // have exhausted while the backend was still cold → backendLive would read false).
-    await reviveIfDead().catch(() => {});
-    logger.info(`engine: warm-up done (backendLive=${backendLive})`);
-    // Keep the SAP session warm WHILE IN USE + self-heal: probe+heal every few minutes,
-    // but ONLY within the activity window of the last user call — so an idle server stops
-    // re-logging on (no 24/7 churn) and the next user call self-heals reactively instead.
-    // unref → never blocks process exit.
-    keepAlive = setInterval(() => {
-      if (Date.now() - lastActivityAt > KEEPALIVE_ACTIVITY_WINDOW_MS) return; // idle → let it lapse
-      void reviveIfDead().catch(() => {});
-    }, KEEPALIVE_INTERVAL_MS);
-    keepAlive.unref?.();
-  }
-
-  return engine;
-}
-
-/** Resolve the backend, start the proxy (+bridge on CF), register the logon handler, connect. */
-async function connect(
-  plan: Exclude<ConnectionPlan, { mode: 'none' }>,
-  btp: BTPConfig | null,
-  driver: AdtLsDriver,
-  tls: { keyPem: string; certPem: string; tlsWorkDir: string },
-): Promise<{ proxy: TlsReverseProxy; bridge?: ConnectivityBridge; destinationId: string }> {
-  let backend: BackendDescriptor;
-  let creds: LogonCredentials;
-  let proxy: TlsReverseProxy;
+  let client: AdtLsClient;
   let bridge: ConnectivityBridge | undefined;
 
-  if (plan.mode === 'connectivity') {
-    const dest = await lookupDestination(btp as BTPConfig, plan.destinationName);
-    const url = new URL(dest.URL);
-    const scheme = url.protocol === 'https:' ? 'https' : 'http';
-    const port = Number(url.port || (scheme === 'https' ? 443 : 80));
-    creds = { kind: 'basic', user: dest.User ?? '', password: dest.Password ?? '' };
-    backend = {
-      destinationId: plan.destinationName,
-      user: dest.User,
-      client: dest['sap-client'] ?? '001',
-      language: 'EN',
-    };
-    const proxyCfg = createConnectivityProxy(btp as BTPConfig, dest.CloudConnectorLocationId);
-    if (!proxyCfg) throw new Error('connectivity service binding missing onpremise_proxy_host');
-    bridge = await startConnectivityBridge(proxyCfg);
-    proxy = await startTlsReverseProxy({
-      key: tls.keyPem,
-      cert: tls.certPem,
-      target: { host: url.hostname, port, protocol: scheme },
-      forwardProxy: { host: '127.0.0.1', port: bridge.port },
-    });
+  const foundation = () => createAdtLs({ adtLs: { path: config.adtLsPath }, mcpPort: config.adtLsMcpPort });
+
+  if (plan.mode === 'none') {
+    client = await foundation();
   } else {
-    const t = plan.target;
-    creds = { kind: 'basic', user: t.user, password: t.password };
-    backend = { destinationId: t.destinationId, user: t.user, client: t.client, language: t.language };
-    proxy = await startTlsReverseProxy({
-      key: tls.keyPem,
-      cert: tls.certPem,
-      target: { host: t.host, port: t.port },
-      insecureUpstream: t.insecure,
-    });
+    try {
+      const c = await buildConnectedClient(plan, btp, config);
+      client = c.client;
+      bridge = c.bridge;
+    } catch (e) {
+      // Non-fatal: a logon/connectivity failure must NOT crash the server — it comes up in
+      // foundation mode (health/tools available, reporting disconnected) so it's diagnosable.
+      logger.error(`engine: SAP connection failed (server starts disconnected): ${errMsg(e)}`);
+      client = await foundation();
+    }
   }
 
-  // Register the reentrance handler (our own GET to the localhost proxy skips TLS).
-  driver.setRequestHandler(REQUEST_BROWSER_LOGON, makeReentranceLogonHandler(creds, { insecure: true }));
-  const destinationId = await connectDestination(driver, backend, proxy, tls.tlsWorkDir);
-  return { proxy, bridge, destinationId };
-}
+  const h0 = client.health();
+  warnOnAdtLsVersionMismatch(h0.adtLsVersion, (m) => logger.warn(`engine: ${m}`));
+  const connectedDestination = h0.connected ? h0.destination : undefined;
+  if (connectedDestination) logger.info(`engine: connected destination ${connectedDestination}`);
 
-/** Create + reentrance-logon + bind the destination. Returns its id, or throws. */
-export async function connectDestination(
-  driver: AdtLsDriver,
-  backend: BackendDescriptor,
-  proxy: TlsReverseProxy,
-  tlsWorkDir: string,
-): Promise<string> {
-  // Isolated store — NEVER the global ~/.adtls/destinations.json (shared with IDEs).
-  const storePath = path.join(tlsWorkDir, 'destinations');
-  await fsp.mkdir(storePath, { recursive: true });
-  await initializeDestinationsService(driver, storePath);
-
-  await createDestination(driver, {
-    id: backend.destinationId,
-    systemUrl: proxy.url,
-    user: backend.user,
-    client: backend.client,
-    language: backend.language,
-  });
-
-  const logon = await ensureLoggedOn(driver, backend.destinationId);
-  if (logon.logonState !== 'connected') {
-    throw new Error(
-      `adt-ls logon to ${backend.destinationId} failed: ${logon.logonState}${logon.message ? ` — ${logon.message}` : ''}`,
-    );
-  }
-  await setMcpDestination(driver, backend.destinationId);
-  logger.info(`engine: connected destination ${backend.destinationId}`);
-  return backend.destinationId;
+  return {
+    connectedDestination,
+    lifecycle: wrapLifecycle(client, safety),
+    navigation: client.navigation,
+    quality: client.quality,
+    services: wrapServices(client, safety),
+    health: () => {
+      const h = client.health();
+      return {
+        adtLs: { name: h.adtLsName, version: h.adtLsVersion, up: true },
+        mcpPort: h.mcpPort,
+        connectedDestination: h.connected ? h.destination : undefined,
+        backendLive: h.backendLive,
+      };
+    },
+    callTool: (name, args = {}) => client.raw.tool(name, args),
+    search: async (pattern, opts = {}) => {
+      const r = await client.repository.search(pattern, { maxResults: opts.maxResults, types: opts.types, cold: true });
+      return r.references ?? [];
+    },
+    listInactiveObjects: () => client.repository.listInactive() as Promise<unknown[]>,
+    listUsers: () => client.repository.getUsers(),
+    reconnect: () => client.reconnect(),
+    dispose: async () => {
+      await client.dispose().catch(() => {});
+      await bridge?.close().catch(() => {});
+    },
+  };
 }

@@ -1,3 +1,4 @@
+import { parseFederated } from '@marianfoo/adt-ls';
 /**
  * The arc-1-lsp MCP server (the "shell"). Reuses the ARC-1 shape — a small set
  * of intent tools — but every tool is backed by the embedded adt-ls engine, not
@@ -6,7 +7,6 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { parseFederated } from '../adt-ls/federated.js';
 import { VERSION } from '../version.js';
 import type { Engine } from './engine.js';
 
