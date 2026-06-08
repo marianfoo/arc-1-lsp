@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/marianfoo/arc-1-lsp/compare/arc-1-lsp-v0.2.0...arc-1-lsp-v0.2.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* **engine:** spread lib services in wrapServices (forward-compat with additive methods) ([#4](https://github.com/marianfoo/arc-1-lsp/issues/4)) ([e5874e7](https://github.com/marianfoo/arc-1-lsp/commit/e5874e71b5922d17d37dad1d59ef5a6e3f982fa6))
+
 ## [0.2.0](https://github.com/marianfoo/arc-1-lsp/compare/arc-1-lsp-v0.1.0...arc-1-lsp-v0.2.0) (2026-06-08)
 
 
