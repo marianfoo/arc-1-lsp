@@ -257,6 +257,32 @@ export async function startEngine(config: Arc1LspConfig, deps: EngineDeps = {}):
   const connectedDestination = h0.connected ? h0.destination : undefined;
   if (connectedDestination) logger.info(`engine: connected destination ${connectedDestination}`);
 
+  // SSO keep-warm. An idle SAP session lapses fast (~90-135s on a4h) and re-auth in SSO mode
+  // means a browser pop. A cheap RAW probe resets the server-side idle timer but NEVER
+  // re-logs-on (so no browser), and we run it under the lapse window → the session stays
+  // alive while the server runs, so re-auth (and its browser tab) effectively never happens
+  // after the initial sign-in. Raw on purpose: `repository.search` self-heals (would
+  // relogon → browser); `raw.lsp` does not. A dead session (e.g. after laptop sleep) just
+  // makes the probe a no-op — the next real call re-auths on-demand.
+  let keepWarmTimer: ReturnType<typeof setInterval> | undefined;
+  if (connectedDestination && plan.mode === 'direct' && plan.target.authMode === 'sso') {
+    const dest = connectedDestination;
+    keepWarmTimer = setInterval(() => {
+      void client.raw
+        .lsp('adtLs/repository/quickSearch', {
+          destination: dest,
+          pattern: 'CL_ABAP_TYPEDESCR',
+          maxResults: 1,
+          types: ['CLAS/OC'],
+        })
+        .catch(() => {});
+    }, 60_000);
+    keepWarmTimer.unref?.();
+    logger.info(
+      'engine: SSO keep-warm active — probing every 60s so the session does not lapse into a browser re-auth.',
+    );
+  }
+
   return {
     connectedDestination,
     lifecycle: wrapLifecycle(client, safety),
@@ -281,6 +307,7 @@ export async function startEngine(config: Arc1LspConfig, deps: EngineDeps = {}):
     listUsers: () => client.repository.getUsers(),
     reconnect: () => client.reconnect(),
     dispose: async () => {
+      if (keepWarmTimer) clearInterval(keepWarmTimer);
       await client.dispose().catch(() => {});
       await bridge?.close().catch(() => {});
     },

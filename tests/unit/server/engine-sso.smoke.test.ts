@@ -96,4 +96,40 @@ describe('startEngine SSO/interactive path (live — needs adt-ls + ARC1_TEST_SA
     },
     200_000,
   );
+
+  it.skipIf(gated)(
+    'SSO keep-warm holds the session alive past the idle-death point (no browser re-auth)',
+    async () => {
+      let opens = 0; // counts requestBrowserBasedLogon → openUrl (initial sign-in + any re-auth)
+      const kwEngine = await startEngine(
+        loadConfig([], {
+          ARC1_ADT_LS_PATH: binPath ?? undefined,
+          ARC1_SAP_HOST: HOST,
+          ARC1_SAP_PORT: PORT,
+          ARC1_SAP_USER: USER,
+          ARC1_SAP_AUTH: 'sso',
+          ARC1_SAP_DESTINATION: 'A4H',
+        }),
+        {
+          openUrl: (url) => {
+            opens++;
+            void browserShim(url);
+          },
+        },
+      );
+      try {
+        expect(kwEngine.connectedDestination).toBe('A4H');
+        expect(opens).toBe(1); // signed in once
+        // Idle 200s — well past a4h's ~90-135s idle death. The keep-warm probe (every 60s)
+        // must keep the session alive WITHOUT a re-auth (no extra openUrl).
+        await new Promise((r) => setTimeout(r, 200_000));
+        const hits = await kwEngine.search('CL_ABAP_TYPEDESCR', { types: ['CLAS/OC'] });
+        expect(hits.length).toBeGreaterThan(0); // still alive → keep-warm worked
+        expect(opens).toBe(1); // and it never re-authed (no browser pop)
+      } finally {
+        await kwEngine.dispose();
+      }
+    },
+    260_000,
+  );
 });
