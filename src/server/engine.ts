@@ -11,7 +11,14 @@
  *   - foundation mode (no SAP) + non-fatal connection failure → the lib's connection-less
  *     `createAdtLs()` (adt-ls + MCP up, no destination).
  */
-import { type AdtLsClient, type SearchReference, type UserRef, basic, createAdtLs } from '@marianfoo/adt-ls';
+import {
+  type AdtLsClient,
+  type SearchReference,
+  type UserRef,
+  basic,
+  createAdtLs,
+  interactive,
+} from '@marianfoo/adt-ls';
 import { type ConnectivityBridge, startConnectivityBridge } from '../btp/bridge.js';
 import { createConnectivityProxy } from '../btp/connectivity.js';
 import { lookupDestination } from '../btp/destination.js';
@@ -20,6 +27,7 @@ import { parseVCAPServices } from '../btp/vcap.js';
 import { warnOnAdtLsVersionMismatch } from '../version.js';
 import type { Arc1LspConfig, SapTargetConfig } from './config.js';
 import { logger } from './logger.js';
+import { openInBrowser } from './open-browser.js';
 import { type WriteSafety, assertWriteAllowed } from './safety.js';
 
 export interface EngineHealth {
@@ -146,11 +154,13 @@ function wrapServices(client: AdtLsClient, safety: WriteSafety): AdtLsClient['se
   };
 }
 
-/** Build a CONNECTED lib client per the plan (DIRECT or Cloud-Connector). */
+/** Build a CONNECTED lib client per the plan (DIRECT or Cloud-Connector). `openUrl` is the
+ * SSO browser-opener (injectable for tests; defaults to the OS opener). */
 async function buildConnectedClient(
   plan: Exclude<ConnectionPlan, { mode: 'none' }>,
   btp: BTPConfig | null,
   config: Arc1LspConfig,
+  openUrl: (url: string) => void,
 ): Promise<{ client: AdtLsClient; bridge?: ConnectivityBridge }> {
   if (plan.mode === 'connectivity') {
     const dest = await lookupDestination(btp as BTPConfig, plan.destinationName);
@@ -178,6 +188,14 @@ async function buildConnectedClient(
     }
   }
   const t = plan.target;
+  const sso = t.authMode === 'sso';
+  // SSO (local desktop): open the browser for interactive sign-in. createAdtLs's logon step
+  // blocks until the user completes it (verified — it waits for the reentrance ticket), so
+  // startup pauses here until sign-in. `basic` stays fully headless.
+  if (sso) {
+    logger.info('engine: SSO mode — a browser will open for sign-in; startup waits until you complete it.');
+  }
+  const auth = sso ? interactive({ openUrl, user: t.user || undefined }) : basic(t.user, t.password);
   const client = await createAdtLs({
     adtLs: { path: config.adtLsPath },
     connection: {
@@ -186,16 +204,28 @@ async function buildConnectedClient(
       client: t.client,
       language: t.language,
     },
-    auth: basic(t.user, t.password),
+    auth,
     destinationId: t.destinationId,
     mcpPort: config.adtLsMcpPort,
+    // SSO has no stored credential, so the lib's background keep-alive heartbeat would
+    // re-open the browser to re-auth a lapsed session WHILE YOU'RE IDLE. Turn it off in SSO
+    // mode → re-auth happens only on-demand (your next real call after the session expired),
+    // never as a surprise background pop. `basic` keeps the headless keep-alive.
+    keepAlive: !sso,
   });
   return { client };
 }
 
-export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
+/** Injectable engine dependencies (test seams). */
+export interface EngineDeps {
+  /** Opener for the interactive SSO logon URL. Defaults to the OS browser opener. */
+  openUrl?: (url: string) => void;
+}
+
+export async function startEngine(config: Arc1LspConfig, deps: EngineDeps = {}): Promise<Engine> {
   const btp = parseVCAPServices();
   const plan = planConnection(config, btp);
+  const openUrl = deps.openUrl ?? openInBrowser;
   const safety: WriteSafety = {
     allowWrites: config.allowWrites,
     allowTransportWrites: config.allowTransportWrites,
@@ -211,7 +241,7 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     client = await foundation();
   } else {
     try {
-      const c = await buildConnectedClient(plan, btp, config);
+      const c = await buildConnectedClient(plan, btp, config, openUrl);
       client = c.client;
       bridge = c.bridge;
     } catch (e) {
@@ -226,6 +256,32 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
   warnOnAdtLsVersionMismatch(h0.adtLsVersion, (m) => logger.warn(`engine: ${m}`));
   const connectedDestination = h0.connected ? h0.destination : undefined;
   if (connectedDestination) logger.info(`engine: connected destination ${connectedDestination}`);
+
+  // SSO keep-warm. An idle SAP session lapses fast (~90-135s on a4h) and re-auth in SSO mode
+  // means a browser pop. A cheap RAW probe resets the server-side idle timer but NEVER
+  // re-logs-on (so no browser), and we run it under the lapse window → the session stays
+  // alive while the server runs, so re-auth (and its browser tab) effectively never happens
+  // after the initial sign-in. Raw on purpose: `repository.search` self-heals (would
+  // relogon → browser); `raw.lsp` does not. A dead session (e.g. after laptop sleep) just
+  // makes the probe a no-op — the next real call re-auths on-demand.
+  let keepWarmTimer: ReturnType<typeof setInterval> | undefined;
+  if (connectedDestination && plan.mode === 'direct' && plan.target.authMode === 'sso') {
+    const dest = connectedDestination;
+    keepWarmTimer = setInterval(() => {
+      void client.raw
+        .lsp('adtLs/repository/quickSearch', {
+          destination: dest,
+          pattern: 'CL_ABAP_TYPEDESCR',
+          maxResults: 1,
+          types: ['CLAS/OC'],
+        })
+        .catch(() => {});
+    }, 60_000);
+    keepWarmTimer.unref?.();
+    logger.info(
+      'engine: SSO keep-warm active — probing every 60s so the session does not lapse into a browser re-auth.',
+    );
+  }
 
   return {
     connectedDestination,
@@ -251,6 +307,7 @@ export async function startEngine(config: Arc1LspConfig): Promise<Engine> {
     listUsers: () => client.repository.getUsers(),
     reconnect: () => client.reconnect(),
     dispose: async () => {
+      if (keepWarmTimer) clearInterval(keepWarmTimer);
       await client.dispose().catch(() => {});
       await bridge?.close().catch(() => {});
     },

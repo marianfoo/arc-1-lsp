@@ -51,7 +51,7 @@
     "format": "biome format --write src tests"
   },
   "dependencies": {
-    "@marianfoo/adt-ls": "^0.1.0",
+    "@marianfoo/adt-ls": "^0.4.1",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "commander": "^12.1.0",
     "vscode-jsonrpc": "^8.2.0",

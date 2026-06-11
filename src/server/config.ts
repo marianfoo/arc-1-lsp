@@ -22,6 +22,22 @@ export interface SapTargetConfig {
   language: string;
   /** Accept the backend's (self-signed) cert. Default true — backend TLS is ours. */
   insecure: boolean;
+  /**
+   * How to obtain the SAP session. `basic` (default) = headless user+password.
+   * `sso` = interactive browser logon (the user signs in via their IdP/SSO) — **local
+   * desktop only** (there is no browser on a headless/remote server). In `sso` mode the
+   * password is not needed; the engine opens the browser and waits for sign-in.
+   *
+   * `sso` caveats: (1) startup **blocks** until you complete sign-in — there is no
+   * client-side timeout, so if you never sign in the server waits until adt-ls's own logon
+   * timeout fires (then it starts disconnected, in foundation mode); (2) re-auth is
+   * **on-demand** — the background keep-alive heartbeat is disabled in `sso` (it would
+   * re-open the browser while you're idle), so when the idle SAP session lapses the browser
+   * re-opens on your **next call** (usually a silent IdP redirect if your SSO cookie is
+   * still valid); (3) a stateful write (update/activate) that happens to race that re-auth
+   * can fail with HTTP 500/423 — just retry it once sign-in completes.
+   */
+  authMode: 'basic' | 'sso';
 }
 
 export interface Arc1LspConfig {
@@ -88,22 +104,30 @@ export function detectLegacySapEnvWarnings(env: NodeJS.ProcessEnv = process.env)
   return out;
 }
 
-/** Build the SAP target from flags/env, or undefined if host/port/creds missing. */
+/**
+ * Build the SAP target from flags/env, or undefined if required fields are missing.
+ * `basic` (default) needs host+port+user+password; `sso` needs only host+port (the user
+ * signs in via the browser, so no password — `user` is an optional destination hint).
+ */
 function loadSapTarget(argv: string[], env: NodeJS.ProcessEnv): SapTargetConfig | undefined {
   const host = flag(argv, 'sap-host') ?? env.ARC1_SAP_HOST;
   const port = flag(argv, 'sap-port') ?? env.ARC1_SAP_PORT;
   const user = flag(argv, 'sap-user') ?? env.ARC1_SAP_USER;
   const password = flag(argv, 'sap-password') ?? env.ARC1_SAP_PASSWORD;
-  if (!host || !port || !user || !password) return undefined;
+  const authMode: 'basic' | 'sso' =
+    (flag(argv, 'sap-auth') ?? env.ARC1_SAP_AUTH ?? 'basic').toLowerCase() === 'sso' ? 'sso' : 'basic';
+  if (!host || !port) return undefined;
+  if (authMode === 'basic' && (!user || !password)) return undefined;
   return {
     destinationId: flag(argv, 'sap-destination') ?? env.ARC1_SAP_DESTINATION ?? 'SAP',
     host,
     port: Number(port),
-    user,
-    password,
+    user: user ?? '',
+    password: password ?? '',
     client: flag(argv, 'sap-client') ?? env.ARC1_SAP_CLIENT ?? '001',
     language: flag(argv, 'sap-language') ?? env.ARC1_SAP_LANGUAGE ?? 'EN',
     insecure: bool(flag(argv, 'sap-insecure') ?? env.ARC1_SAP_INSECURE, true),
+    authMode,
   };
 }
 
