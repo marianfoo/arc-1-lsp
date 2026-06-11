@@ -56,7 +56,7 @@ describe('loadConfig — sapTarget', () => {
     expect(loadConfig([], noPwd).sapTarget).toBeUndefined();
   });
 
-  it('builds a target with defaults (destination SAP, client 001, EN, insecure true)', () => {
+  it('builds a target with defaults (destination SAP, client 001, EN, insecure true, basic auth)', () => {
     const t = loadConfig([], full).sapTarget;
     expect(t).toEqual({
       destinationId: 'SAP',
@@ -67,6 +67,7 @@ describe('loadConfig — sapTarget', () => {
       client: '001',
       language: 'EN',
       insecure: true,
+      authMode: 'basic',
     });
   });
 
@@ -84,6 +85,33 @@ describe('loadConfig — sapTarget', () => {
   it('CLI flags override env', () => {
     const t = loadConfig(['--sap-host', 'cli.host', '--sap-port', '443'], full).sapTarget;
     expect(t).toMatchObject({ host: 'cli.host', port: 443 });
+  });
+
+  it('defaults to basic auth', () => {
+    expect(loadConfig([], full).sapTarget?.authMode).toBe('basic');
+  });
+
+  it('sso mode needs only host+port (no password); user is an optional hint', () => {
+    const t = loadConfig([], { ARC1_SAP_HOST: 'a4h', ARC1_SAP_PORT: '50001', ARC1_SAP_AUTH: 'sso' }).sapTarget;
+    expect(t).toMatchObject({ host: 'a4h', port: 50001, authMode: 'sso', user: '', password: '' });
+    const withHint = loadConfig([], {
+      ARC1_SAP_HOST: 'a4h',
+      ARC1_SAP_PORT: '50001',
+      ARC1_SAP_AUTH: 'sso',
+      ARC1_SAP_USER: 'MARIAN',
+    }).sapTarget;
+    expect(withHint).toMatchObject({ authMode: 'sso', user: 'MARIAN' });
+  });
+
+  it('basic requires a password but sso does not', () => {
+    const hp = { ARC1_SAP_HOST: 'a4h', ARC1_SAP_PORT: '50001' };
+    expect(loadConfig([], hp).sapTarget).toBeUndefined(); // basic + no password
+    expect(loadConfig([], { ...hp, ARC1_SAP_AUTH: 'sso' }).sapTarget).toBeDefined();
+  });
+
+  it('--sap-auth selects sso (CLI)', () => {
+    const t = loadConfig(['--sap-auth', 'sso'], { ARC1_SAP_HOST: 'a4h', ARC1_SAP_PORT: '50001' }).sapTarget;
+    expect(t?.authMode).toBe('sso');
   });
 });
 
