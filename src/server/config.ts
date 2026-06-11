@@ -28,11 +28,14 @@ export interface SapTargetConfig {
    * desktop only** (there is no browser on a headless/remote server). In `sso` mode the
    * password is not needed; the engine opens the browser and waits for sign-in.
    *
-   * Two `sso` caveats: (1) startup **blocks** until you complete sign-in — there is no
+   * `sso` caveats: (1) startup **blocks** until you complete sign-in — there is no
    * client-side timeout, so if you never sign in the server waits until adt-ls's own logon
-   * timeout fires (then it starts disconnected, in foundation mode); (2) when the idle SAP
-   * session expires and the lib re-logs-on, the browser **re-opens** for re-auth (usually a
-   * silent IdP redirect if your SSO cookie is still valid).
+   * timeout fires (then it starts disconnected, in foundation mode); (2) re-auth is
+   * **on-demand** — the background keep-alive heartbeat is disabled in `sso` (it would
+   * re-open the browser while you're idle), so when the idle SAP session lapses the browser
+   * re-opens on your **next call** (usually a silent IdP redirect if your SSO cookie is
+   * still valid); (3) a stateful write (update/activate) that happens to race that re-auth
+   * can fail with HTTP 500/423 — just retry it once sign-in completes.
    */
   authMode: 'basic' | 'sso';
 }

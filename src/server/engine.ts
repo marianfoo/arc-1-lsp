@@ -188,13 +188,14 @@ async function buildConnectedClient(
     }
   }
   const t = plan.target;
+  const sso = t.authMode === 'sso';
   // SSO (local desktop): open the browser for interactive sign-in. createAdtLs's logon step
   // blocks until the user completes it (verified — it waits for the reentrance ticket), so
   // startup pauses here until sign-in. `basic` stays fully headless.
-  if (t.authMode === 'sso') {
+  if (sso) {
     logger.info('engine: SSO mode — a browser will open for sign-in; startup waits until you complete it.');
   }
-  const auth = t.authMode === 'sso' ? interactive({ openUrl, user: t.user || undefined }) : basic(t.user, t.password);
+  const auth = sso ? interactive({ openUrl, user: t.user || undefined }) : basic(t.user, t.password);
   const client = await createAdtLs({
     adtLs: { path: config.adtLsPath },
     connection: {
@@ -206,6 +207,11 @@ async function buildConnectedClient(
     auth,
     destinationId: t.destinationId,
     mcpPort: config.adtLsMcpPort,
+    // SSO has no stored credential, so the lib's background keep-alive heartbeat would
+    // re-open the browser to re-auth a lapsed session WHILE YOU'RE IDLE. Turn it off in SSO
+    // mode → re-auth happens only on-demand (your next real call after the session expired),
+    // never as a surprise background pop. `basic` keeps the headless keep-alive.
+    keepAlive: !sso,
   });
   return { client };
 }

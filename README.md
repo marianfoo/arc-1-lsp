@@ -254,7 +254,7 @@ process instead of a URL. GUI inspector: `npx @modelcontextprotocol/inspector`.
 | **SAP connection — DIRECT mode** (internet-reachable backend) | | |
 | `ARC1_SAP_HOST` / `--sap-host` | — | backend host |
 | `ARC1_SAP_PORT` / `--sap-port` | — | backend **HTTPS** port |
-| `ARC1_SAP_AUTH` / `--sap-auth` | `basic` | `basic` (headless user+password) or `sso` (interactive browser logon — **local desktop only**). In `sso` mode no password is needed; the engine opens the browser and **blocks startup until you sign in** (a browser re-opens on idle-session re-auth). |
+| `ARC1_SAP_AUTH` / `--sap-auth` | `basic` | `basic` (headless user+password) or `sso` (interactive browser logon — **local desktop only**). In `sso` mode no password is needed; the engine opens the browser and **blocks startup until you sign in**. Re-auth is **on-demand**: the background keep-alive is off in `sso`, so when the idle session lapses the browser re-opens on your **next call** (a write racing that re-auth may 500/423 — retry once). |
 | `ARC1_SAP_USER` / `--sap-user` | — | SAP user (basic: the reentrance ticket is fetched with these creds; sso: an optional destination hint) |
 | `ARC1_SAP_PASSWORD` / `--sap-password` | — | SAP password (basic mode; set via env / `cf set-env`, never committed). Not used in `sso` mode. |
 | `ARC1_SAP_DESTINATION` / `--sap-destination` | `SAP` | `adt-ls` destination id (DIRECT) **or** BTP destination name (CC) |
