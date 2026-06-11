@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/marianfoo/arc-1-lsp/compare/arc-1-lsp-v0.2.1...arc-1-lsp-v0.3.0) (2026-06-11)
+
+
+### Features
+
+* interactive SSO logon for local use (ARC1_SAP_AUTH=sso) ([#6](https://github.com/marianfoo/arc-1-lsp/issues/6)) ([24a0cbe](https://github.com/marianfoo/arc-1-lsp/commit/24a0cbef6a2d521fe8b3171530bf7b10d3a70a18))
+
 ## [0.2.1](https://github.com/marianfoo/arc-1-lsp/compare/arc-1-lsp-v0.2.0...arc-1-lsp-v0.2.1) (2026-06-08)
 
 
