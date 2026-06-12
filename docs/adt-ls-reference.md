@@ -276,3 +276,34 @@ tools resolve a **symbol name** → its `selectionRange.start` via `documentSymb
 would enrich completion items with signatures via the same backend, **without** the cache
 gate. **Skip:** raw semanticTokens (sent only to prime hover/highlight), codeLens
 (SRVB/JSON only). See `docs/research/adt-ls-capability-map.md`.
+
+## 10. Auth boundary + X.509 client-cert logon (passwordless, no browser) — PROVEN
+
+**adt-ls's HTTP auth is Basic / OAuth / SAML-reentrance only** — verified in the binary
+(v1.0.1): `com.sap.adt.destinations.model` ships only `HttpBasicAuthHandler` +
+`SamlWithReentranceTicketAuthenticationHandler` (+ OAuth via `systemurlinfo`); a sweep of all
+196 plugins found `spnego`/`kerberos`/`gssapi`/`clientcert` class names **only in third-party
+libs**, zero in any `com.sap.adt.*`. So **SNC/Kerberos SSO is unreachable by adt-ls**, and
+Kerberos/SPNEGO-over-HTTP also needs a **paid** SAP SSO license + a KDC. (SNC secures RFC/DIAG
+— SAP GUI — not the HTTP channel ADT uses.)
+
+The one license-free, KDC-free, **passwordless + headless** path is **X.509 client certificate
+(mutual TLS)**, achieved *through the reverse proxy*, not adt-ls itself (ADR-0009). The proxy
+presents the cert on the upstream hop; the backend maps it via CERTRULE. **Proven end-to-end
+vs a4h** (`GET /sap/bc/adt/discovery` → 200 as MARIAN, no-cert → 401; engine connects + searches).
+
+**Server recipe (AS ABAP, license-free — same machinery as Cloud-Connector PP):**
+- `icm/HTTPS/verify_client = 1` (+ `VCLIENT=1` on the HTTPS `icm/server_port`), `login/certificate = 1`.
+- Trust the issuing CA in the SSL Server PSE: `sapgenpse maintain_pk -a <ca.crt> -p SAPSSLS.pse` (back up the PSE first).
+- **CERTRULE** rule: issuer = your CA, `Subject → CN → Login As E-Mail`, filter `CN=*` (or the full subject DN).
+- **Reload the ICM** (`kill icman`; the dispatcher restarts it) — it caches CERTRULE at SSL-logon.
+
+**Client-cert gotchas (live-verified — each cost real time):**
+- **RDN order**: SAP renders DNs RFC2253 (reverse-of-encoding). Build the cert `/CN/OU/O/C` so its
+  RFC2253 subject (`C=…,O=…,OU=…,CN=…`) matches the CERTRULE filter — else *"Certificate not mapped" → 401*.
+- The cert **CN must equal the user's SU01 e-mail** (the rule maps CN → e-mail → user).
+- **macOS client needs nothing installed** (plain TLS; CommonCryptoLib is only for SNC, which adt-ls can't use).
+- adt-ls's Apache client uses `useSystemProperties`, so `-Djavax.net.ssl.keyStore` *would* present a cert
+  directly (no proxy) against a real-cert backend — a future simplification.
+
+Consumed by arc-1-lsp as `ARC1_SAP_AUTH=clientcert` + `ARC1_SAP_CLIENT_CERT`/`_KEY`; library API: `clientCert({cert,key})`.
