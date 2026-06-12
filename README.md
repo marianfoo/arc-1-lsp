@@ -263,7 +263,7 @@ process instead of a URL. GUI inspector: `npx @modelcontextprotocol/inspector`.
 | `ARC1_SAP_AUTH` / `--sap-auth` | `basic` | `basic` (headless user+password), `sso` (interactive browser logon — **local desktop only**; no password, but startup **blocks until you sign in** and re-auth re-opens the browser on your next call), or `clientcert` (passwordless **X.509 mutual TLS** — fully headless, **no browser**, silent re-auth; needs `ARC1_SAP_CLIENT_CERT`/`_KEY`). |
 | `ARC1_SAP_USER` / `--sap-user` | — | SAP user (basic: the reentrance ticket is fetched with these creds; sso / clientcert: an optional destination hint — the real user comes from the cert mapping) |
 | `ARC1_SAP_PASSWORD` / `--sap-password` | — | SAP password (basic mode; set via env / `cf set-env`, never committed). Not used in `sso` / `clientcert` mode. |
-| `ARC1_SAP_CLIENT_CERT` / `--sap-client-cert` | — | PEM client-certificate file path (`clientcert` mode). The cert's subject must map to a SAP user (e.g. AS ABAP `icm/HTTPS/verify_client=1` + CERTRULE). The reverse proxy presents it on every upstream hop. |
+| `ARC1_SAP_CLIENT_CERT` / `--sap-client-cert` | — | PEM client-certificate file path (`clientcert` mode); the subject must map to a SAP user via CERTRULE. **Where to get it** — and why your everyday "it just works" SSO cert usually *can't* be used (short-lived / non-exportable): see [Obtaining a client certificate](docs/client-cert-auth-setup.md#obtaining-a-client-certificate). |
 | `ARC1_SAP_CLIENT_KEY` / `--sap-client-key` | — | PEM private-key file path (`clientcert` mode). |
 | `ARC1_SAP_DESTINATION` / `--sap-destination` | `SAP` | `adt-ls` destination id (DIRECT) **or** BTP destination name (CC) |
 | `ARC1_SAP_CLIENT` / `--sap-client` | `001` | SAP client |

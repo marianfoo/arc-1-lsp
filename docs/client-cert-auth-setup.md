@@ -142,10 +142,49 @@ testing arc-1-lsp.
 
 ## Obtaining a client certificate
 
-You need a certificate + private key (as PEM files) where:
+You need a certificate + private key (as **PEM files**) where:
 
 - the **issuing CA is trusted** in STRUST (step 2), and
 - the **subject maps to your user** via the CERTRULE rule (step 3).
+
+### "SSO already just works for me in SAP GUI / Eclipse — where are my cert and key?"
+
+**Usually there is no file you can point at — and that's by design.** Modern SAP single
+sign-on ([SAP Secure Login Service][sls] / Secure Login Client) issues a **short-lived,
+non-exportable** X.509 certificate *after* you authenticate, and the Secure Login Client
+puts the private key in the operating system's **protected** store (Windows certificate
+store / macOS Keychain), then **deletes it when the cert expires or the client closes**
+([SAP][sls], [community][slcmac]). SAP GUI and Eclipse ADT use it transparently — you never
+see, and cannot export, a `.crt`/`.key` pair. So `ARC1_SAP_CLIENT_CERT`/`_KEY` **cannot reuse
+that everyday SSO certificate.**
+
+What to do depends on **how your SSO actually works** — if unsure, ask your SAP Basis /
+security team "how does ADT / HTTP logon authenticate?":
+
+| Your SSO is… | Use this with arc-1-lsp |
+|--------------|--------------------------|
+| **Browser / SAML** (you get redirected to a web login page) | **`ARC1_SAP_AUTH=sso`** — the interactive browser flow, no cert files at all. This mirrors what your browser already does. |
+| **SAP Secure Login Service / Client** (short-lived X.509, "just works" in SAP GUI) | the everyday cert is **non-exportable** → not usable as a static PEM. Get a **dedicated long-lived cert** (below), or use `sso` if the system also offers browser login. |
+| **SNC / Kerberos** (SAP GUI logs you on with your Windows identity, no browser) | not usable by adt-ls at all — SNC is the SAP GUI/RFC channel, not HTTP. Use `sso`, or a dedicated cert. |
+
+**Check what you actually have on your machine:**
+
+- **macOS** — open *Keychain Access*, find the SAP / corporate certificate, expand it,
+  right-click the **private key → Export "…"**. If Export is greyed out, the key is
+  non-exportable (typical for SSO certs) → you cannot produce a PEM key.
+- **Windows** — `certmgr.msc → Personal → Certificates`; you can only export the key if the
+  cert was imported "with private key, mark as exportable".
+- If **SAP Secure Login Client** is installed, assume your certs are short-lived and
+  non-exportable.
+
+**The clean path for a headless tool** (this is what to request): ask your **PKI / SAP Basis
+team for a dedicated X.509 client certificate** issued for ABAP tool logon — with an
+**exportable** private key, its subject mapped to your SAP user, the issuing CA trusted in
+**STRUST**, and the **CERTRULE** rule added (the [server setup](#server-setup-as-abap-one-time)
+above). They hand you a `.crt` + `.key` (or a `.p12` you split to PEM, [below](#b-enterprise)),
+you point `ARC1_SAP_CLIENT_CERT`/`_KEY` at them, and you're done. (On macOS this is often the
+*only* option anyway — SAP does not yet support short-lived Secure Login *Server* enrollment in
+the Secure Login Client on Mac, [community][slcmac].)
 
 ### A. Local development / test (self-signed CA)
 
@@ -216,6 +255,10 @@ Whatever the source, the only hard requirements are the two server-side facts: t
 | `ARC1_SAP_CLIENT` / `--sap-client` | — | SAP client (default `001`) |
 | `ARC1_SAP_USER` / `--sap-user` | — | optional destination hint only; the real user comes from the cert mapping |
 
+> **Don't have a `.crt` / `.key` pair?** If your enterprise SSO already "just works" in SAP
+> GUI / Eclipse, that certificate usually **cannot** be used here (it's short-lived and
+> non-exportable) — see [Obtaining a client certificate](#obtaining-a-client-certificate).
+
 No `ARC1_SAP_PASSWORD` is used. `ARC1_SAP_INSECURE` is forced on in this mode (the reverse
 proxy does the mutual-TLS hop). In Cursor / Claude Desktop / VS Code, set the same
 `ARC1_SAP_*` keys in the MCP server's `env`.
@@ -260,6 +303,7 @@ SAP product documentation:
 - [Rule-Based Certificate Mapping — transaction CERTRULE][certrule]
 - [Forward SSL Certificates for X.509 Authentication (reverse proxy / Web Dispatcher)][forwardssl]
 - [SAP Note 1848999 — CommonCryptoLib central note (licensing: encryption/server-auth is free; user-SSO via Kerberos/X.509 needs SAP SSO / Secure Login Service)][note1848999]
+- [SAP Secure Login Service for SAP GUI][sls] — short-lived, non-exportable X.509 certs for SSO (and the [macOS Secure Login Client limitation][slcmac])
 
 Worked examples / background:
 
@@ -278,3 +322,5 @@ Internal: [ADR-0009](adr/0009-client-cert-auth.md) (decision) · `adt-ls-referen
 [howtox509]: https://community.sap.com/t5/technology-blog-posts-by-sap/how-to-enable-sso-using-x-509-client-certificates-in-abap-app-server/ba-p/13182918
 [kerb2x509]: https://community.sap.com/t5/technology-blog-posts-by-sap/reusing-kerberos-token-for-issuing-x-509-client-certificates-with-secure/ba-p/13132812
 [itsfullofstars]: https://www.itsfullofstars.de/2020/07/x509-based-logon-1-configure-icm-to-accept-client-certificates/
+[sls]: https://help.sap.com/docs/secure-login-service-for-sap-gui
+[slcmac]: https://answers.sap.com/questions/12010479/sap-secure-login-client-on-mac-with-x509.html
