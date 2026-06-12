@@ -113,6 +113,32 @@ describe('loadConfig — sapTarget', () => {
     const t = loadConfig(['--sap-auth', 'sso'], { ARC1_SAP_HOST: 'a4h', ARC1_SAP_PORT: '50001' }).sapTarget;
     expect(t?.authMode).toBe('sso');
   });
+
+  it('clientcert mode needs host+port+cert+key (no password)', () => {
+    const hp = { ARC1_SAP_HOST: 'a4h', ARC1_SAP_PORT: '50001', ARC1_SAP_AUTH: 'clientcert' };
+    expect(loadConfig([], hp).sapTarget).toBeUndefined(); // missing cert/key → no target
+    const t = loadConfig([], {
+      ...hp,
+      ARC1_SAP_CLIENT_CERT: '/p/client.crt',
+      ARC1_SAP_CLIENT_KEY: '/p/client.key',
+    }).sapTarget;
+    expect(t).toMatchObject({
+      host: 'a4h',
+      port: 50001,
+      authMode: 'clientcert',
+      password: '',
+      clientCertPath: '/p/client.crt',
+      clientKeyPath: '/p/client.key',
+    });
+  });
+
+  it('--sap-client-cert/--sap-client-key + --sap-auth clientcert (CLI)', () => {
+    const t = loadConfig(['--sap-auth', 'clientcert', '--sap-client-cert', '/c.crt', '--sap-client-key', '/c.key'], {
+      ARC1_SAP_HOST: 'a4h',
+      ARC1_SAP_PORT: '50001',
+    }).sapTarget;
+    expect(t).toMatchObject({ authMode: 'clientcert', clientCertPath: '/c.crt', clientKeyPath: '/c.key' });
+  });
 });
 
 describe('loadConfig — write safety', () => {

@@ -211,6 +211,12 @@ the system's object catalog. Two connection modes:
   `destination` services and set only `ARC1_SAP_DESTINATION <btp-destination-name>`;
   the engine resolves it and routes through the connectivity bridge automatically.
 
+**Auth (DIRECT mode):** `basic` (user + password, default), `sso` (interactive browser
+logon), or `clientcert` (**passwordless X.509 mutual TLS** — no browser, no password, silent
+re-auth; set `ARC1_SAP_CLIENT_CERT`/`_KEY`). The client-cert path has its own guide covering
+the AS ABAP server setup and how to obtain/store certificates (incl. enterprise / SAP Secure
+Login Service): **[docs/client-cert-auth-setup.md](docs/client-cert-auth-setup.md)**.
+
 ### Connect an MCP client
 
 ```jsonc
@@ -254,9 +260,11 @@ process instead of a URL. GUI inspector: `npx @modelcontextprotocol/inspector`.
 | **SAP connection — DIRECT mode** (internet-reachable backend) | | |
 | `ARC1_SAP_HOST` / `--sap-host` | — | backend host |
 | `ARC1_SAP_PORT` / `--sap-port` | — | backend **HTTPS** port |
-| `ARC1_SAP_AUTH` / `--sap-auth` | `basic` | `basic` (headless user+password) or `sso` (interactive browser logon — **local desktop only**). In `sso` mode no password is needed; the engine opens the browser and **blocks startup until you sign in**. Re-auth is **on-demand**: the background keep-alive is off in `sso`, so when the idle session lapses the browser re-opens on your **next call** (a write racing that re-auth may 500/423 — retry once). |
-| `ARC1_SAP_USER` / `--sap-user` | — | SAP user (basic: the reentrance ticket is fetched with these creds; sso: an optional destination hint) |
-| `ARC1_SAP_PASSWORD` / `--sap-password` | — | SAP password (basic mode; set via env / `cf set-env`, never committed). Not used in `sso` mode. |
+| `ARC1_SAP_AUTH` / `--sap-auth` | `basic` | `basic` (headless user+password), `sso` (interactive browser logon — **local desktop only**; no password, but startup **blocks until you sign in** and re-auth re-opens the browser on your next call), or `clientcert` (passwordless **X.509 mutual TLS** — fully headless, **no browser**, silent re-auth; needs `ARC1_SAP_CLIENT_CERT`/`_KEY`). |
+| `ARC1_SAP_USER` / `--sap-user` | — | SAP user (basic: the reentrance ticket is fetched with these creds; sso / clientcert: an optional destination hint — the real user comes from the cert mapping) |
+| `ARC1_SAP_PASSWORD` / `--sap-password` | — | SAP password (basic mode; set via env / `cf set-env`, never committed). Not used in `sso` / `clientcert` mode. |
+| `ARC1_SAP_CLIENT_CERT` / `--sap-client-cert` | — | PEM client-certificate file path (`clientcert` mode); the subject must map to a SAP user via CERTRULE. **Where to get it** — and why your everyday "it just works" SSO cert usually *can't* be used (short-lived / non-exportable): see [Obtaining a client certificate](docs/client-cert-auth-setup.md#obtaining-a-client-certificate). |
+| `ARC1_SAP_CLIENT_KEY` / `--sap-client-key` | — | PEM private-key file path (`clientcert` mode). |
 | `ARC1_SAP_DESTINATION` / `--sap-destination` | `SAP` | `adt-ls` destination id (DIRECT) **or** BTP destination name (CC) |
 | `ARC1_SAP_CLIENT` / `--sap-client` | `001` | SAP client |
 | `ARC1_SAP_LANGUAGE` / `--sap-language` | `EN` | SAP logon language |

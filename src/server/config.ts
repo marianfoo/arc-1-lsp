@@ -36,8 +36,17 @@ export interface SapTargetConfig {
    * re-opens on your **next call** (usually a silent IdP redirect if your SSO cookie is
    * still valid); (3) a stateful write (update/activate) that happens to race that re-auth
    * can fail with HTTP 500/423 — just retry it once sign-in completes.
+   *
+   * `clientcert` = passwordless **X.509 mutual TLS** — the reverse proxy presents a client
+   * cert and the backend maps it to a user (e.g. AS ABAP `icm/HTTPS/verify_client` + CERTRULE).
+   * Fully headless (no browser, no password) and re-auth on a lapsed session is silent — works
+   * on a server too, unlike `sso`. Needs `clientCertPath` + `clientKeyPath` (PEM).
    */
-  authMode: 'basic' | 'sso';
+  authMode: 'basic' | 'sso' | 'clientcert';
+  /** PEM client-certificate file path (clientcert mode). */
+  clientCertPath?: string;
+  /** PEM private-key file path (clientcert mode). */
+  clientKeyPath?: string;
 }
 
 export interface Arc1LspConfig {
@@ -107,17 +116,22 @@ export function detectLegacySapEnvWarnings(env: NodeJS.ProcessEnv = process.env)
 /**
  * Build the SAP target from flags/env, or undefined if required fields are missing.
  * `basic` (default) needs host+port+user+password; `sso` needs only host+port (the user
- * signs in via the browser, so no password — `user` is an optional destination hint).
+ * signs in via the browser, so no password — `user` is an optional destination hint);
+ * `clientcert` needs host+port+clientCertPath+clientKeyPath (no password, no browser).
  */
 function loadSapTarget(argv: string[], env: NodeJS.ProcessEnv): SapTargetConfig | undefined {
   const host = flag(argv, 'sap-host') ?? env.ARC1_SAP_HOST;
   const port = flag(argv, 'sap-port') ?? env.ARC1_SAP_PORT;
   const user = flag(argv, 'sap-user') ?? env.ARC1_SAP_USER;
   const password = flag(argv, 'sap-password') ?? env.ARC1_SAP_PASSWORD;
-  const authMode: 'basic' | 'sso' =
-    (flag(argv, 'sap-auth') ?? env.ARC1_SAP_AUTH ?? 'basic').toLowerCase() === 'sso' ? 'sso' : 'basic';
+  const rawAuth = (flag(argv, 'sap-auth') ?? env.ARC1_SAP_AUTH ?? 'basic').toLowerCase();
+  const authMode: 'basic' | 'sso' | 'clientcert' =
+    rawAuth === 'sso' ? 'sso' : rawAuth === 'clientcert' ? 'clientcert' : 'basic';
+  const clientCertPath = flag(argv, 'sap-client-cert') ?? env.ARC1_SAP_CLIENT_CERT;
+  const clientKeyPath = flag(argv, 'sap-client-key') ?? env.ARC1_SAP_CLIENT_KEY;
   if (!host || !port) return undefined;
   if (authMode === 'basic' && (!user || !password)) return undefined;
+  if (authMode === 'clientcert' && (!clientCertPath || !clientKeyPath)) return undefined;
   return {
     destinationId: flag(argv, 'sap-destination') ?? env.ARC1_SAP_DESTINATION ?? 'SAP',
     host,
@@ -128,6 +142,8 @@ function loadSapTarget(argv: string[], env: NodeJS.ProcessEnv): SapTargetConfig 
     language: flag(argv, 'sap-language') ?? env.ARC1_SAP_LANGUAGE ?? 'EN',
     insecure: bool(flag(argv, 'sap-insecure') ?? env.ARC1_SAP_INSECURE, true),
     authMode,
+    clientCertPath,
+    clientKeyPath,
   };
 }
 
