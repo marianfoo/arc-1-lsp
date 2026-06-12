@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/marianfoo/arc-1-lsp/compare/arc-1-lsp-v0.3.0...arc-1-lsp-v0.4.0) (2026-06-12)
+
+
+### Features
+
+* **engine:** clientcert auth — passwordless X.509 mutual-TLS logon ([#8](https://github.com/marianfoo/arc-1-lsp/issues/8)) ([ef3dd67](https://github.com/marianfoo/arc-1-lsp/commit/ef3dd6786134defa18cb1a72ab89bc64f189c11f))
+
 ## [0.3.0](https://github.com/marianfoo/arc-1-lsp/compare/arc-1-lsp-v0.2.1...arc-1-lsp-v0.3.0) (2026-06-11)
 
 
