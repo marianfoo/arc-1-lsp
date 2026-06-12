@@ -211,6 +211,12 @@ the system's object catalog. Two connection modes:
   `destination` services and set only `ARC1_SAP_DESTINATION <btp-destination-name>`;
   the engine resolves it and routes through the connectivity bridge automatically.
 
+**Auth (DIRECT mode):** `basic` (user + password, default), `sso` (interactive browser
+logon), or `clientcert` (**passwordless X.509 mutual TLS** — no browser, no password, silent
+re-auth; set `ARC1_SAP_CLIENT_CERT`/`_KEY`). The client-cert path has its own guide covering
+the AS ABAP server setup and how to obtain/store certificates (incl. enterprise / SAP Secure
+Login Service): **[docs/client-cert-auth-setup.md](docs/client-cert-auth-setup.md)**.
+
 ### Connect an MCP client
 
 ```jsonc

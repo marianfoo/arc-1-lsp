@@ -289,8 +289,9 @@ Kerberos/SPNEGO-over-HTTP also needs a **paid** SAP SSO license + a KDC. (SNC se
 
 The one license-free, KDC-free, **passwordless + headless** path is **X.509 client certificate
 (mutual TLS)**, achieved *through the reverse proxy*, not adt-ls itself (ADR-0009). The proxy
-presents the cert on the upstream hop; the backend maps it via CERTRULE. **Proven end-to-end
-vs a4h** (`GET /sap/bc/adt/discovery` → 200 as MARIAN, no-cert → 401; engine connects + searches).
+presents the cert on the upstream hop; the backend maps it via CERTRULE. **Proven end-to-end**
+against a live AS ABAP system (`GET /sap/bc/adt/discovery` → 200 as the cert-mapped user, no-cert
+→ 401; engine connects + searches). Full setup guide: `docs/client-cert-auth-setup.md`.
 
 **Server recipe (AS ABAP, license-free — same machinery as Cloud-Connector PP):**
 - `icm/HTTPS/verify_client = 1` (+ `VCLIENT=1` on the HTTPS `icm/server_port`), `login/certificate = 1`.

@@ -21,9 +21,9 @@ if (!binPath) {
 const certPath = process.env.ARC1_TEST_CLIENT_CERT;
 const keyPath = process.env.ARC1_TEST_CLIENT_KEY;
 const gated = !binPath || !certPath || !keyPath;
-const HOST = process.env.ARC1_TEST_SAP_HOST ?? 'a4h.marianzeis.de';
+const HOST = process.env.ARC1_TEST_SAP_HOST ?? 'localhost';
 const PORT = process.env.ARC1_TEST_SAP_PORT ?? '50001';
-const USER = process.env.ARC1_TEST_SAP_USER ?? 'MARIAN';
+const USER = process.env.ARC1_TEST_SAP_USER; // optional destination hint; the cert determines the user
 
 describe('startEngine clientcert path (live — needs adt-ls + ARC1_TEST_CLIENT_CERT/_KEY)', () => {
   let engine: Engine | undefined;

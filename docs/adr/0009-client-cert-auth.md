@@ -1,15 +1,16 @@
 # ADR-0009: Passwordless X.509 client-certificate logon (`clientcert` auth mode)
 
 ## Status
-Accepted (2026-06-12) — **PROVEN end-to-end against a4h**: passwordless `GET
-/sap/bc/adt/discovery` → 200 as MARIAN (no-cert → 401), and arc-1-lsp's engine connects
-+ runs a repository search with no password and no browser. Shipped as
-`@marianfoo/adt-ls` `clientCert()` (0.5.0) + arc-1-lsp `ARC1_SAP_AUTH=clientcert`.
+Accepted (2026-06-12) — **PROVEN end-to-end against a live AS ABAP system** (the ABAP
+developer edition): passwordless `GET /sap/bc/adt/discovery` → 200 as the cert-mapped user
+(no-cert → 401), and arc-1-lsp's engine connects + runs a repository search with no password
+and no browser. Shipped as `@marianfoo/adt-ls` `clientCert()` (0.5.0) +
+arc-1-lsp `ARC1_SAP_AUTH=clientcert`. **Full setup guide:** [`docs/client-cert-auth-setup.md`](../client-cert-auth-setup.md).
 
 ## Context
 The browser-SSO path (`interactive` / `ARC1_SAP_AUTH=sso`) has two pains for local dev:
-the IdP redirect can stall behind the localhost reverse proxy, and an a4h session dies in
-~2 min idle → a browser pop on the next call. SNC/Kerberos SSO is **unreachable by adt-ls**
+the IdP redirect can stall behind the localhost reverse proxy, and an idle SAP session dies
+fast (a couple of minutes on a dev system) → a browser pop on the next call. SNC/Kerberos SSO is **unreachable by adt-ls**
 — it only speaks Basic / OAuth / SAML-reentrance over HTTP, and SNC secures the RFC/DIAG
 channel, not HTTP (see `adt-ls-reference.md` + the `adt-ls-auth-kinds-boundary` finding;
 Kerberos/SPNEGO also needs a paid SAP SSO license + a KDC). The one **license-free,
