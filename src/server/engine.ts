@@ -11,11 +11,14 @@
  *   - foundation mode (no SAP) + non-fatal connection failure → the lib's connection-less
  *     `createAdtLs()` (adt-ls + MCP up, no destination).
  */
+import { promises as fsp } from 'node:fs';
 import {
   type AdtLsClient,
+  type LogonStrategy,
   type SearchReference,
   type UserRef,
   basic,
+  clientCert,
   createAdtLs,
   interactive,
 } from '@marianfoo/adt-ls';
@@ -189,18 +192,34 @@ async function buildConnectedClient(
   }
   const t = plan.target;
   const sso = t.authMode === 'sso';
+  const cc = t.authMode === 'clientcert';
   // SSO (local desktop): open the browser for interactive sign-in. createAdtLs's logon step
   // blocks until the user completes it (verified — it waits for the reentrance ticket), so
-  // startup pauses here until sign-in. `basic` stays fully headless.
+  // startup pauses here until sign-in. `basic` and `clientcert` stay fully headless.
   if (sso) {
     logger.info('engine: SSO mode — a browser will open for sign-in; startup waits until you complete it.');
   }
-  const auth = sso ? interactive({ openUrl, user: t.user || undefined }) : basic(t.user, t.password);
+  let auth: LogonStrategy;
+  if (sso) {
+    auth = interactive({ openUrl, user: t.user || undefined });
+  } else if (cc) {
+    // Passwordless X.509 mutual TLS: the lib's reverse proxy presents this cert upstream, so the
+    // backend authenticates the TLS connection (verify_client + CERTRULE) — no browser, no password.
+    const [cert, key] = await Promise.all([
+      fsp.readFile(t.clientCertPath as string, 'utf8'),
+      fsp.readFile(t.clientKeyPath as string, 'utf8'),
+    ]);
+    logger.info('engine: client-cert mode — passwordless X.509 mutual TLS (no browser, silent re-auth).');
+    auth = clientCert({ cert, key, user: t.user || undefined });
+  } else {
+    auth = basic(t.user, t.password);
+  }
   const client = await createAdtLs({
     adtLs: { path: config.adtLsPath },
     connection: {
       systemUrl: `https://${t.host}:${t.port}`,
-      selfSigned: t.insecure,
+      // clientCert needs the reverse proxy to present the cert (mutual-TLS hop) → force selfSigned.
+      selfSigned: cc ? true : t.insecure,
       client: t.client,
       language: t.language,
     },
@@ -210,7 +229,8 @@ async function buildConnectedClient(
     // SSO has no stored credential, so the lib's background keep-alive heartbeat would
     // re-open the browser to re-auth a lapsed session WHILE YOU'RE IDLE. Turn it off in SSO
     // mode → re-auth happens only on-demand (your next real call after the session expired),
-    // never as a surprise background pop. `basic` keeps the headless keep-alive.
+    // never as a surprise background pop. `basic` + `clientcert` keep the headless keep-alive
+    // (clientcert re-auth is silent — the proxy just re-presents the cert).
     keepAlive: !sso,
   });
   return { client };
